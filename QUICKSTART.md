@@ -2,13 +2,18 @@
 
 ## Instalação Rápida
 
+### Automática (Recomendado)
 ```bash
-# 1. Instalar dependências
-pip install -r requirements.txt
-
-# 2. Instalar WARP
-# Download: https://1.1.1.1/
+INSTALAR.bat
 ```
+
+### Manual
+```bash
+pip install -r requirements.txt
+```
+
+**Depois instale WARP:**
+- Download: https://1.1.1.1/
 
 ## Usar Agora
 

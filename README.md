@@ -14,6 +14,17 @@ Rotação automática de IP via WARP quando os limites do OpenCode são atingido
 
 ## 🚀 Instalação
 
+### Opção 1: INSTALAR.bat (Recomendado)
+```bash
+INSTALAR.bat
+```
+O script vai:
+1. Verificar se Python está instalado
+2. Atualizar pip
+3. Instalar todas as dependências
+4. Verificar instalação
+
+### Opção 2: Manual
 1. **Instalar Python 3.8+**
 
 2. **Instalar dependências:**
