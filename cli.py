@@ -149,15 +149,17 @@ class CodeOpenCLI:
                 return 'enter'
             if key == b'\x1b':
                 return 'esc'
-            if key == b'\xe0':
-                key2 = msvcrt.getch()
-                if key2 == b'H':
+            # Setas (suporte para \x00 e \xe0)
+            if key in (b'\x00', b'\xe0'):
+                arrow = msvcrt.getch()
+                if arrow == b'H':
                     return 'up'
-                elif key2 == b'P':
+                elif arrow == b'P':
                     return 'down'
-            if key.lower() == b'w':
+            # W/S (case insensitive)
+            if key.upper() == b'W':
                 return 'up'
-            if key.lower() == b's':
+            if key.upper() == b'S':
                 return 'down'
         return None
     

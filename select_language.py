@@ -95,17 +95,17 @@ def select_language():
             while msvcrt.kbhit():
                 msvcrt.getch()
             
-            # Setas
-            if key == b'\xe0':
-                key2 = msvcrt.getch()
-                if key2 == b'H':  # Up
+            # Detectar setas (múltiplas tentativas para PowerShell)
+            if key in (b'\x00', b'\xe0'):  # Prefixo de seta no Windows
+                arrow = msvcrt.getch()
+                if arrow == b'H':  # Up
                     current = (current - 1) % len(options)
-                elif key2 == b'P':  # Down
+                elif arrow == b'P':  # Down
                     current = (current + 1) % len(options)
-            # W/S
-            elif key.lower() == b'w':
+            # W/S (case insensitive)
+            elif key.upper() == b'W':
                 current = (current - 1) % len(options)
-            elif key.lower() == b's':
+            elif key.upper() == b'S':
                 current = (current + 1) % len(options)
             # Enter
             elif key == b'\r':
