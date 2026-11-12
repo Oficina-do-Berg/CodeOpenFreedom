@@ -1,18 +1,37 @@
+# -*- coding: utf-8 -*-
 """
-CodeOpen - Interface CLI v3 (BLESSED - SEM PISCAR)
+CodeOpen - Interface CLI
 by OFICINA-DO-BERG
 """
 
+import os
 import sys
-from blessed import Terminal
+import time
+import msvcrt
+
+# Configurar UTF-8
+if sys.platform == 'win32':
+    os.system('chcp 65001 >nul 2>&1')
 
 from core import Config, ConnectionManager, OpenCodeManager, IPRotator, LogMonitor, Orchestrator
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-term = Terminal()
 
-# Logo
+# Detectar suporte ANSI
+USE_ANSI = os.environ.get('WT_SESSION') or os.environ.get('TERM_PROGRAM') == 'vscode'
+
+# Cores
+if USE_ANSI:
+    RED = '\033[91m'
+    BOLD_RED = '\033[1;91m'
+    WHITE = '\033[97m'
+    DIM_WHITE = '\033[2;37m'
+    GREEN = '\033[92m'
+    RESET = '\033[0m'
+else:
+    RED = BOLD_RED = WHITE = DIM_WHITE = GREEN = RESET = ''
+
 LOGO = """
     ██████╗ ██████╗ ██████╗ ███████╗ ██████╗ ██████╗ ███████╗███╗   ██╗
    ██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝████╗  ██║
@@ -26,52 +45,30 @@ LOGO = """
 # Traduções
 TRANSLATIONS = {
     'pt': {
-        'connection': 'Conexao',
-        'ip': 'IP',
-        'opencode': 'OpenCode',
-        'monitor': 'Monitor',
-        'rotations': 'Rotacoes',
-        'disconnected': 'Desconectado',
-        'active': 'ATIVO',
-        'stopped': 'PARADO',
-        'inactive': 'INATIVO',
-        'auto_mode': 'MODO AUTOMATICO',
-        'start': 'INICIAR',
-        'stop': 'PARAR',
-        'rotate_ip': 'ROTACIONAR IP',
-        'connection_menu': 'CONEXAO',
-        'exit': 'SAIR',
-        'navigate': 'Use W/S ou ↑/↓ para navegar | ENTER para selecionar | ESC para sair',
-        'connect_warp': 'CONECTAR WARP',
-        'disconnect': 'DESCONECTAR',
-        'rotate': 'ROTACIONAR',
-        'back': 'VOLTAR',
-        'press_key': 'Pressione qualquer tecla',
-        'status': 'Status'
+        'connection': 'Conexao', 'ip': 'IP', 'opencode': 'OpenCode',
+        'monitor': 'Monitor', 'rotations': 'Rotacoes',
+        'disconnected': 'Desconectado', 'active': 'ATIVO',
+        'stopped': 'PARADO', 'inactive': 'INATIVO',
+        'auto_mode': 'MODO AUTOMATICO', 'start': 'INICIAR',
+        'stop': 'PARAR', 'rotate_ip': 'ROTACIONAR IP',
+        'connection_menu': 'CONEXAO', 'exit': 'SAIR',
+        'navigate': 'Use W/S ou ↑/↓ | ENTER | ESC para sair',
+        'connect_warp': 'CONECTAR WARP', 'disconnect': 'DESCONECTAR',
+        'rotate': 'ROTACIONAR', 'back': 'VOLTAR',
+        'press_key': 'Pressione qualquer tecla'
     },
     'en': {
-        'connection': 'Connection',
-        'ip': 'IP',
-        'opencode': 'OpenCode',
-        'monitor': 'Monitor',
-        'rotations': 'Rotations',
-        'disconnected': 'Disconnected',
-        'active': 'ACTIVE',
-        'stopped': 'STOPPED',
-        'inactive': 'INACTIVE',
-        'auto_mode': 'AUTO MODE',
-        'start': 'START',
-        'stop': 'STOP',
-        'rotate_ip': 'ROTATE IP',
-        'connection_menu': 'CONNECTION',
-        'exit': 'EXIT',
-        'navigate': 'Use W/S or ↑/↓ to navigate | ENTER to select | ESC to exit',
-        'connect_warp': 'CONNECT WARP',
-        'disconnect': 'DISCONNECT',
-        'rotate': 'ROTATE',
-        'back': 'BACK',
-        'press_key': 'Press any key',
-        'status': 'Status'
+        'connection': 'Connection', 'ip': 'IP', 'opencode': 'OpenCode',
+        'monitor': 'Monitor', 'rotations': 'Rotations',
+        'disconnected': 'Disconnected', 'active': 'ACTIVE',
+        'stopped': 'STOPPED', 'inactive': 'INACTIVE',
+        'auto_mode': 'AUTO MODE', 'start': 'START',
+        'stop': 'STOP', 'rotate_ip': 'ROTATE IP',
+        'connection_menu': 'CONNECTION', 'exit': 'EXIT',
+        'navigate': 'Use W/S or ↑/↓ | ENTER | ESC to exit',
+        'connect_warp': 'CONNECT WARP', 'disconnect': 'DISCONNECT',
+        'rotate': 'ROTATE', 'back': 'BACK',
+        'press_key': 'Press any key'
     }
 }
 
@@ -84,18 +81,14 @@ class CodeOpenCLI:
         self.rotator = IPRotator(self.connection, self.config)
         self.monitor = LogMonitor(self.config)
         self.orchestrator = Orchestrator(
-            self.connection,
-            self.opencode,
-            self.rotator,
-            self.monitor,
-            self.config
+            self.connection, self.opencode, self.rotator,
+            self.monitor, self.config
         )
         self.current_option = 0
         self.lang = lang
         self.update_menu_options()
     
     def update_menu_options(self):
-        """Atualiza opções do menu com idioma atual"""
         t = TRANSLATIONS[self.lang]
         self.menu_options = [
             (t['auto_mode'], self.start_automatic_mode),
@@ -107,263 +100,201 @@ class CodeOpenCLI:
         ]
     
     def t(self, key):
-        """Traduz chave"""
         return TRANSLATIONS[self.lang].get(key, key)
     
+    def clear_screen(self):
+        os.system('cls')
+    
     def draw_screen(self):
-        """Desenha a tela completa SEM PISCAR"""
-        # Limpar e posicionar cursor no topo
-        print(term.home + term.clear, end='')
-        
-        # Logo (vermelho)
-        print(term.bold_red(LOGO))
+        self.clear_screen()
+        print(f"{RED}{LOGO}{RESET}")
         print()
         
-        # Status
         status = self.orchestrator.get_status()
-        
-        # Cabeçalho da tabela
-        print(f"  {term.white(self.t('connection')): <12} ", end='')
         conn = status['connection']
+        
+        print(f"  {WHITE}{self.t('connection')}: {RESET}", end='')
         if conn['connected']:
-            print(term.red(f"{conn['method']}: {conn['ip']}"))
+            print(f"{RED}{conn['method']} - {conn['ip']}{RESET}")
         else:
-            print(term.white(self.t('disconnected')))
+            print(f"{DIM_WHITE}{self.t('disconnected')}{RESET}")
         
-        print(f"  {term.white(self.t('opencode')): <12} ", end='')
-        if status['opencode_running']:
-            print(term.red(self.t('active')))
-        else:
-            print(term.white(self.t('stopped')))
+        print(f"  {WHITE}{self.t('opencode')}: {RESET}", end='')
+        print(f"{RED if status['opencode_running'] else DIM_WHITE}{self.t('active') if status['opencode_running'] else self.t('stopped')}{RESET}")
         
-        print(f"  {term.white(self.t('monitor')): <12} ", end='')
-        if status['monitoring']:
-            print(term.red(self.t('active')))
-        else:
-            print(term.white(self.t('inactive')))
+        print(f"  {WHITE}{self.t('monitor')}: {RESET}", end='')
+        print(f"{RED if status['monitoring'] else DIM_WHITE}{self.t('active') if status['monitoring'] else self.t('inactive')}{RESET}")
         
-        print(f"  {term.white(self.t('rotations')): <12} {term.red(str(status['rotation_count']))}")
-        
+        print(f"  {WHITE}{self.t('rotations')}: {RED}{status['rotation_count']}{RESET}")
         print()
-        print(term.dim_white("─" * 70))
+        print(f"{DIM_WHITE}{'─' * 70}{RESET}")
         print()
         
-        # Menu
         for i, (label, _) in enumerate(self.menu_options):
             if i == self.current_option:
-                print(f"  {term.red('>')} {term.bold_red(f'[ {label} ]')}")
+                print(f"  {RED}>{RESET} {BOLD_RED}[ {label} ]{RESET}")
             else:
-                print(f"    {term.dim_white(f'[ {label} ]')}")
+                print(f"    {DIM_WHITE}[ {label} ]{RESET}")
         
         print()
-        print(f"  {term.dim_white(self.t('navigate'))}")
+        print(f"  {DIM_WHITE}{self.t('navigate')}{RESET}")
+    
+    def get_key(self):
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            while msvcrt.kbhit():
+                msvcrt.getch()
+            
+            if key == b'\r':
+                return 'enter'
+            if key == b'\x1b':
+                return 'esc'
+            if key == b'\xe0':
+                key2 = msvcrt.getch()
+                if key2 == b'H':
+                    return 'up'
+                elif key2 == b'P':
+                    return 'down'
+            if key.lower() == b'w':
+                return 'up'
+            if key.lower() == b's':
+                return 'down'
+        return None
     
     def main_menu(self):
-        """Menu principal COM BLESSED"""
-        with term.cbreak(), term.hidden_cursor():
-            self.draw_screen()
+        last_option = -1
+        
+        while True:
+            if self.current_option != last_option:
+                self.draw_screen()
+                last_option = self.current_option
             
-            while True:
-                key = term.inkey(timeout=0.05)
-                
-                if key.code == term.KEY_UP or key.lower() == 'w':
-                    self.current_option = (self.current_option - 1) % len(self.menu_options)
-                    self.draw_screen()
-                
-                elif key.code == term.KEY_DOWN or key.lower() == 's':
-                    self.current_option = (self.current_option + 1) % len(self.menu_options)
-                    self.draw_screen()
-                
-                elif key.code == term.KEY_ENTER or key == '\r' or key == '\n':
-                    _, action = self.menu_options[self.current_option]
-                    
-                    if action == self.exit_app:
-                        action()
-                        return
-                    
-                    # Executar ação em tela cheia
-                    print(term.home + term.clear, end='')
+            key = self.get_key()
+            
+            if key == 'up':
+                self.current_option = (self.current_option - 1) % len(self.menu_options)
+            elif key == 'down':
+                self.current_option = (self.current_option + 1) % len(self.menu_options)
+            elif key == 'enter':
+                _, action = self.menu_options[self.current_option]
+                if action == self.exit_app:
                     action()
-                    
-                    # Redesenha menu
-                    self.draw_screen()
-                
-                elif key.code == term.KEY_ESCAPE or key.lower() == 'q':
-                    self.exit_app()
                     return
+                action()
+                last_option = -1
+            elif key == 'esc':
+                self.exit_app()
+                return
+            
+            time.sleep(0.02)
     
     def start_automatic_mode(self):
-        """Inicia modo automático"""
-        print(term.home + term.clear, end='')
-        print()
-        print(f"  {term.bold_red('MODO AUTOMATICO')}")
-        print(f"  {term.dim_white('─' * 40)}")
-        print()
-        print(f"  {term.white('Iniciando fluxo automatico...')}")
-        print()
-        print(f"  {term.dim_white(self.t('press_key'))}...")
-        
-        with term.cbreak():
-            term.inkey()
+        self.clear_screen()
+        print(f"\n  {BOLD_RED}MODO AUTOMATICO{RESET}")
+        print(f"  {DIM_WHITE}{'─' * 40}{RESET}\n")
+        print(f"  {WHITE}Funcionalidade em desenvolvimento...{RESET}\n")
+        print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+        msvcrt.getch()
     
     def start_opencode(self):
-        """Inicia OpenCode"""
-        print(term.home + term.clear, end='')
-        print()
-        print(f"  {term.white('Iniciando OpenCode...')}")
-        
+        self.clear_screen()
+        print(f"\n  {WHITE}Iniciando OpenCode...{RESET}\n")
         success = self.opencode.start()
-        
-        print()
-        if success:
-            print(f"  {term.red('>')} OpenCode iniciado")
-        else:
-            print(f"  {term.red('ERRO')} Falha ao iniciar")
-        
-        print()
-        print(f"  {term.dim_white(self.t('press_key'))}...")
-        
-        with term.cbreak():
-            term.inkey()
+        print(f"  {RED if success else DIM_WHITE}{'OK - OpenCode iniciado' if success else 'ERRO - Falha ao iniciar'}{RESET}\n")
+        print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+        msvcrt.getch()
     
     def stop_opencode(self):
-        """Para OpenCode"""
-        print(term.home + term.clear, end='')
-        print()
-        print(f"  {term.white('Parando OpenCode...')}")
-        
+        self.clear_screen()
+        print(f"\n  {WHITE}Parando OpenCode...{RESET}\n")
         success = self.opencode.stop()
-        
-        print()
-        if success:
-            print(f"  {term.red('>')} OpenCode parado")
-        else:
-            print(f"  {term.red('ERRO')} Falha ao parar")
-        
-        print()
-        print(f"  {term.dim_white(self.t('press_key'))}...")
-        
-        with term.cbreak():
-            term.inkey()
+        print(f"  {RED if success else DIM_WHITE}{'OK - OpenCode parado' if success else 'ERRO - Falha ao parar'}{RESET}\n")
+        print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+        msvcrt.getch()
     
     def rotate_ip(self):
-        """Rotaciona IP"""
-        print(term.home + term.clear, end='')
-        print()
-        print(f"  {term.white('Rotacionando IP...')}")
-        
+        self.clear_screen()
+        print(f"\n  {WHITE}Rotacionando IP...{RESET}\n")
         success = self.rotator.rotate()
-        
-        print()
-        if success:
-            print(f"  {term.red('>')} IP rotacionado")
-        else:
-            print(f"  {term.red('ERRO')} Falha na rotacao")
-        
-        print()
-        print(f"  {term.dim_white(self.t('press_key'))}...")
-        
-        with term.cbreak():
-            term.inkey()
+        print(f"  {RED if success else DIM_WHITE}{'OK - IP rotacionado' if success else 'ERRO - Falha na rotacao'}{RESET}\n")
+        print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+        msvcrt.getch()
     
     def connection_menu(self):
-        """Menu de conexão"""
         conn_options = [
-            (self.t('connect_warp'), 'connect_warp'),
+            (self.t('connect_warp'), 'connect'),
             (self.t('disconnect'), 'disconnect'),
             (self.t('rotate'), 'rotate'),
             (self.t('back'), 'back')
         ]
         current = 0
+        last_current = -1
         
-        def draw_conn_menu():
-            print(term.home + term.clear, end='')
-            print()
-            print(f"  {term.bold_red('CONEXAO')}")
-            print()
-            
-            status = self.connection.get_status()
-            if status['connected']:
-                print(f"  {term.white('Status')}: {term.red(status['method'])}")
-                print(f"  {term.white('IP')}: {term.white(status['ip'])}")
-            else:
-                print(f"  {term.white('Status')}: {term.dim_white(self.t('disconnected'))}")
-            
-            print()
-            print(term.dim_white("─" * 70))
-            print()
-            
-            for i, (label, _) in enumerate(conn_options):
-                if i == current:
-                    print(f"  {term.red('>')} {term.bold_red(f'[ {label} ]')}")
+        while True:
+            if current != last_current:
+                self.clear_screen()
+                print(f"\n  {BOLD_RED}CONEXAO{RESET}\n")
+                status = self.connection.get_status()
+                if status['connected']:
+                    print(f"  Status: {RED}{status['method']}{RESET}")
+                    print(f"  IP: {WHITE}{status['ip']}{RESET}\n")
                 else:
-                    print(f"    {term.dim_white(f'[ {label} ]')}")
+                    print(f"  Status: {DIM_WHITE}{self.t('disconnected')}{RESET}\n")
+                
+                print(f"{DIM_WHITE}{'─' * 70}{RESET}\n")
+                
+                for i, (label, _) in enumerate(conn_options):
+                    if i == current:
+                        print(f"  {RED}>{RESET} {BOLD_RED}[ {label} ]{RESET}")
+                    else:
+                        print(f"    {DIM_WHITE}[ {label} ]{RESET}")
+                
+                print(f"\n  {DIM_WHITE}Use W/S | ENTER | ESC{RESET}")
+                last_current = current
             
-            print()
-            print(f"  {term.dim_white('Use W/S | ENTER | ESC')}")
-        
-        with term.cbreak(), term.hidden_cursor():
-            draw_conn_menu()
+            key = self.get_key()
             
-            while True:
-                key = term.inkey(timeout=0.05)
-                
-                if key.code == term.KEY_UP or key.lower() == 'w':
-                    current = (current - 1) % len(conn_options)
-                    draw_conn_menu()
-                
-                elif key.code == term.KEY_DOWN or key.lower() == 's':
-                    current = (current + 1) % len(conn_options)
-                    draw_conn_menu()
-                
-                elif key.code == term.KEY_ENTER or key == '\r' or key == '\n':
-                    label, action_name = conn_options[current]
-                    
-                    if action_name == 'back':
-                        return
-                    
-                    print(term.home + term.clear, end='')
-                    print()
-                    print(f"  {term.white(label)}...")
-                    
-                    if action_name == 'connect_warp':
-                        success, msg = self.connection.connect('WARP')
-                    elif action_name == 'disconnect':
-                        success, msg = self.connection.disconnect()
-                    elif action_name == 'rotate':
-                        success, msg = self.connection.rotate_warp_ip()
-                    
-                    print()
-                    print(f"  {term.white(msg)}")
-                    print()
-                    print(f"  {term.dim_white(self.t('press_key'))}...")
-                    
-                    term.inkey()
-                    draw_conn_menu()
-                
-                elif key.code == term.KEY_ESCAPE:
+            if key == 'up':
+                current = (current - 1) % len(conn_options)
+            elif key == 'down':
+                current = (current + 1) % len(conn_options)
+            elif key == 'enter':
+                label, action_name = conn_options[current]
+                if action_name == 'back':
                     return
+                
+                self.clear_screen()
+                print(f"\n  {WHITE}{label}...{RESET}\n")
+                
+                if action_name == 'connect':
+                    success, msg = self.connection.connect('WARP')
+                elif action_name == 'disconnect':
+                    success, msg = self.connection.disconnect()
+                elif action_name == 'rotate':
+                    success, msg = self.connection.rotate_warp_ip()
+                
+                print(f"  {WHITE}{msg}{RESET}\n")
+                print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+                msvcrt.getch()
+                last_current = -1
+            elif key == 'esc':
+                return
+            
+            time.sleep(0.02)
     
     def exit_app(self):
-        """Sai da aplicação"""
-        print(term.home + term.clear, end='')
-        print()
-        print()
-        print(f"  {term.bold_red('CodeOpen')}")
-        print(f"  {term.dim_white('by OFICINA-DO-BERG')}")
-        print()
-        print(f"  {term.dim_white('Encerrando...')}")
-        print()
+        self.clear_screen()
+        print(f"\n\n  {BOLD_RED}CodeOpen{RESET}")
+        print(f"  {DIM_WHITE}by OFICINA-DO-BERG{RESET}\n")
+        print(f"  {DIM_WHITE}Encerrando...{RESET}\n")
         
         if self.orchestrator.get_status()['monitoring']:
             self.orchestrator.stop_flow()
-        
         if self.orchestrator.get_status()['opencode_running']:
             self.opencode.stop()
 
 
 if __name__ == "__main__":
-    # Pegar idioma dos argumentos
     lang = 'pt'
     if len(sys.argv) > 1:
         lang = sys.argv[1]

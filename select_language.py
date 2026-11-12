@@ -1,11 +1,37 @@
+# -*- coding: utf-8 -*-
 """
-Seleção de Idioma v3 (BLESSED - SEM PISCAR)
+Seleção de Idioma - CodeOpen
 """
 
 import os
-from blessed import Terminal
+import sys
+import msvcrt
+import time
 
-term = Terminal()
+# Configurar UTF-8
+if sys.platform == 'win32':
+    os.system('chcp 65001 >nul 2>&1')
+
+# Detectar se suporta ANSI
+def supports_ansi():
+    """Verifica se o terminal suporta ANSI"""
+    return os.environ.get('WT_SESSION') or os.environ.get('TERM_PROGRAM') == 'vscode'
+
+USE_ANSI = supports_ansi()
+
+# Cores ANSI
+if USE_ANSI:
+    RED = '\033[91m'
+    BOLD_RED = '\033[1;91m'
+    DIM_WHITE = '\033[2;37m'
+    RESET = '\033[0m'
+    CLEAR = '\033[2J\033[H'
+else:
+    RED = ''
+    BOLD_RED = ''
+    DIM_WHITE = ''
+    RESET = ''
+    CLEAR = ''
 
 LOGO = """
     ██████╗ ██████╗ ██████╗ ███████╗ ██████╗ ██████╗ ███████╗███╗   ██╗
@@ -18,88 +44,99 @@ LOGO = """
 """
 
 
-def draw_menu(current):
-    """Desenha menu SEM PISCAR"""
-    options = [
-        ("PORTUGUES", "pt"),
-        ("ENGLISH", "en")
-    ]
+def clear_screen():
+    """Limpa a tela"""
+    if USE_ANSI:
+        print(CLEAR, end='', flush=True)
+    else:
+        os.system('cls')
+
+
+def draw_menu(current, options):
+    """Desenha o menu"""
+    clear_screen()
     
-    # Limpar e posicionar cursor
-    print(term.home + term.clear, end='')
-    
-    # Logo
-    print(term.bold_red(LOGO))
+    print(f"{RED}{LOGO}{RESET}")
     print()
-    print(f"  {term.bold_red('SELECT LANGUAGE / SELECIONE O IDIOMA')}")
-    print(f"  {term.dim_white('─' * 41)}")
+    print(f"  {BOLD_RED}SELECT LANGUAGE / SELECIONE O IDIOMA{RESET}")
+    print(f"  {DIM_WHITE}─────────────────────────────────────────{RESET}")
     print()
     
-    # Opções
     for i, (label, _) in enumerate(options):
         if i == current:
-            print(f"  {term.red('>')} {term.bold_red(f'[ {label} ]')}")
+            print(f"  {RED}>{RESET} {BOLD_RED}[ {label} ]{RESET}")
         else:
-            print(f"    {term.dim_white(f'[ {label} ]')}")
+            print(f"    {DIM_WHITE}[ {label} ]{RESET}")
     
     print()
-    print(f"  {term.dim_white('Use')} {term.red('W/S')} {term.dim_white('or')} {term.red('↑/↓')} {term.dim_white('|')} {term.red('ENTER')} {term.dim_white('to select')}")
-    
-    return options
+    print(f"  {DIM_WHITE}Use {RED}W/S{RESET} {DIM_WHITE}ou{RESET} {RED}↑/↓{RESET} {DIM_WHITE}|{RESET} {RED}ENTER{RESET} {DIM_WHITE}para selecionar{RESET}")
 
 
 def select_language():
-    """Seleciona idioma COM BLESSED"""
-    current = 0
+    """Seletor de idioma"""
     options = [
         ("PORTUGUES", "pt"),
         ("ENGLISH", "en")
     ]
+    current = 0
+    last_current = -1
     
-    with term.cbreak(), term.hidden_cursor():
-        # Desenho inicial
-        draw_menu(current)
+    while True:
+        # Redesenha apenas quando muda
+        if current != last_current:
+            draw_menu(current, options)
+            last_current = current
         
-        while True:
-            # Aguardar tecla (timeout 50ms)
-            key = term.inkey(timeout=0.05)
+        # Aguardar tecla
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
             
-            if key.code == term.KEY_UP or key.lower() == 'w':
+            # Limpar buffer extra
+            while msvcrt.kbhit():
+                msvcrt.getch()
+            
+            # Setas
+            if key == b'\xe0':
+                key2 = msvcrt.getch()
+                if key2 == b'H':  # Up
+                    current = (current - 1) % len(options)
+                elif key2 == b'P':  # Down
+                    current = (current + 1) % len(options)
+            # W/S
+            elif key.lower() == b'w':
                 current = (current - 1) % len(options)
-                draw_menu(current)
-            
-            elif key.code == term.KEY_DOWN or key.lower() == 's':
+            elif key.lower() == b's':
                 current = (current + 1) % len(options)
-                draw_menu(current)
-            
-            elif key.code == term.KEY_ENTER or key == '\r' or key == '\n':
+            # Enter
+            elif key == b'\r':
                 _, lang_code = options[current]
                 
                 # Salvar idioma
                 with open('.language', 'w') as f:
                     f.write(lang_code)
                 
-                # Mensagem de confirmação
-                print(term.home + term.clear, end='')
-                print(term.bold_red(LOGO))
+                clear_screen()
+                print(f"{RED}{LOGO}{RESET}")
                 print()
-                print(f"  {term.green('✓')} Language set to: {term.red(lang_code.upper())}")
+                print(f"  ✓ Language set to: {RED}{lang_code.upper()}{RESET}")
                 print()
-                
-                # Pequena pausa para ver confirmação
-                import time
                 time.sleep(0.5)
                 
-                # Limpar antes de iniciar CLI
-                print(term.home + term.clear, end='')
-                
-                # Iniciar CLI v3
+                # Iniciar CLI
+                clear_screen()
                 if lang_code == 'pt':
-                    os.system('python cli_v3.py pt')
+                    os.system('python cli.py pt')
                 else:
-                    os.system('python cli_v3.py en')
+                    os.system('python cli.py en')
                 break
+        
+        time.sleep(0.02)
 
 
 if __name__ == "__main__":
-    select_language()
+    try:
+        select_language()
+    except KeyboardInterrupt:
+        clear_screen()
+        print("\n  Encerrando...")
+        sys.exit(0)
