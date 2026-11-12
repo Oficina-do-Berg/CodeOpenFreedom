@@ -1,0 +1,17 @@
+# CodeOpen - Dependências Essenciais
+
+# Interface CLI (blessed - sem piscar)
+blessed>=1.20.0
+windows-curses>=2.4.0
+
+# Gerenciamento de processos
+psutil>=5.9.0
+
+# Requisições HTTP (para verificação de IP)
+requests>=2.31.0
+
+# Monitoramento de arquivos de log
+watchdog>=3.0.0
+
+# Utilitários
+python-dotenv>=1.0.0
