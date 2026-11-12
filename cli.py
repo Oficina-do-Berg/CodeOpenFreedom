@@ -142,25 +142,44 @@ class CodeOpenCLI:
     def get_key(self):
         if msvcrt.kbhit():
             key = msvcrt.getch()
-            while msvcrt.kbhit():
-                msvcrt.getch()
             
             if key == b'\r':
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 return 'enter'
+            
             if key == b'\x1b':
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 return 'esc'
-            # Setas (suporte para \x00 e \xe0)
+            
+            # Setas (NÃO limpar buffer antes de ler segunda parte!)
             if key in (b'\x00', b'\xe0'):
                 arrow = msvcrt.getch()
+                # Agora sim limpar buffer
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+                
                 if arrow == b'H':
                     return 'up'
                 elif arrow == b'P':
                     return 'down'
+            
             # W/S (case insensitive)
             if key.upper() == b'W':
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 return 'up'
+            
             if key.upper() == b'S':
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 return 'down'
+            
+            # Limpar buffer para outras teclas
+            while msvcrt.kbhit():
+                msvcrt.getch()
+        
         return None
     
     def main_menu(self):

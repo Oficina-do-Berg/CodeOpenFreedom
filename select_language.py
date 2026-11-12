@@ -91,24 +91,34 @@ def select_language():
         if msvcrt.kbhit():
             key = msvcrt.getch()
             
-            # Limpar buffer extra
-            while msvcrt.kbhit():
-                msvcrt.getch()
-            
-            # Detectar setas (múltiplas tentativas para PowerShell)
-            if key in (b'\x00', b'\xe0'):  # Prefixo de seta no Windows
+            # Detectar setas (NÃO limpar buffer antes de ler segunda parte!)
+            if key in (b'\x00', b'\xe0'):  # Prefixo de seta
                 arrow = msvcrt.getch()
+                # Agora sim, limpar buffer extra
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+                
                 if arrow == b'H':  # Up
                     current = (current - 1) % len(options)
                 elif arrow == b'P':  # Down
                     current = (current + 1) % len(options)
             # W/S (case insensitive)
             elif key.upper() == b'W':
+                # Limpar buffer
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 current = (current - 1) % len(options)
             elif key.upper() == b'S':
+                # Limpar buffer
+                while msvcrt.kbhit():
+                    msvcrt.getch()
                 current = (current + 1) % len(options)
             # Enter
             elif key == b'\r':
+                # Limpar buffer
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+                
                 _, lang_code = options[current]
                 
                 # Salvar idioma
@@ -129,6 +139,10 @@ def select_language():
                 else:
                     os.system('python cli.py en')
                 break
+            else:
+                # Limpar buffer para outras teclas
+                while msvcrt.kbhit():
+                    msvcrt.getch()
         
         time.sleep(0.02)
 
