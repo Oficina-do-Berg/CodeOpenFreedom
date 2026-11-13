@@ -110,17 +110,17 @@ class ConnectionManager:
             return False, str(e)
     
     def disconnect_warp(self) -> Tuple[bool, str]:
-        """Desconecta WARP"""
+        """Desconecta WARP com checagem de código de retorno"""
         try:
-            subprocess.run(
-                [self.warp_cli, 'disconnect'],
-                capture_output=True,
-                timeout=10
-            )
+            result = self.warp_call(['disconnect'], timeout=10)
             self.proxy_url = None
             self.current_method = None
-            logger.info("⏹️ WARP desconectado")
-            return True, "WARP desconectado"
+            if result.returncode == 0:
+                logger.info("⏹️ WARP desconectado com sucesso")
+                return True, "WARP desconectado"
+            else:
+                logger.warning(f"⚠️ Falha ao desconectar WARP: {result.stderr.strip()}")
+                return False, f"Falha ao desconectar: {result.stderr.strip()}"
         except Exception as e:
             return False, str(e)
     
@@ -144,127 +144,134 @@ class ConnectionManager:
 
     def warp_up(self) -> bool:
         """
-        Configura e conecta WARP após novo registro (igual ao warpUp() do original C++).
+        Configura e conecta WARP com validação em cada etapa.
         Faz: registration show → mode proxy → proxy port → connect → poll status → verify trace
         """
         port = self.config.get('warp_port', 40000)
         
-        # Verificar se registro existe, se não criar
+        # 1. Verificar se registro existe; se não, criar
         result = self.warp_call(['registration', 'show'])
         if result.returncode != 0 or 'Missing' in result.stdout:
-            self.warp_call(['registration', 'new'], timeout=15)
+            reg_new = self.warp_call(['registration', 'new'], timeout=15)
+            if reg_new.returncode != 0:
+                logger.error(f"  ❌ Falha ao criar novo registro WARP: {reg_new.stderr.strip()}")
+                return False
         
-        # Configurar modo proxy (ESSENCIAL - o original sempre faz isso!)
+        # 2. Configurar modo proxy e verificar retorno
         logger.info("  Configurando modo proxy...")
-        self.warp_call(['mode', 'proxy'])
-        self.warp_call(['proxy', 'port', str(port)])
+        mode_res = self.warp_call(['mode', 'proxy'])
+        if mode_res.returncode != 0:
+            logger.error(f"  ❌ Falha ao definir modo proxy: {mode_res.stderr.strip()}")
+            return False
+            
+        port_res = self.warp_call(['proxy', 'port', str(port)])
+        if port_res.returncode != 0:
+            logger.error(f"  ❌ Falha ao configurar porta do proxy ({port}): {port_res.stderr.strip()}")
+            return False
         
-        # Conectar
+        # 3. Conectar
         logger.info("  Conectando WARP...")
-        self.warp_call(['connect'], timeout=30)
+        conn_res = self.warp_call(['connect'], timeout=30)
+        if conn_res.returncode != 0 and 'Connected' not in conn_res.stdout:
+            logger.warning(f"  ⚠️ Aviso na conexão inicial do WARP: {conn_res.stderr.strip()}")
         
-        # Poll status até conectar (igual ao original: loop com warpCall("status"))
+        # 4. Polling de status até conectar
         wait_secs = 15
         logger.info(f"  Aguardando conexão (até {wait_secs}s)...")
+        connected = False
         for i in range(wait_secs):
-            result = self.warp_call(['status'])
-            if result.returncode == 0 and 'Connected' in result.stdout:
+            status_res = self.warp_call(['status'])
+            if status_res.returncode == 0 and 'Connected' in status_res.stdout:
                 logger.info(f"  ✅ WARP conectado após {i+1}s")
+                connected = True
                 break
             time.sleep(1)
         
-        # Configurar proxy URL
+        if not connected:
+            logger.error("  ❌ Timeout ao aguardar status 'Connected' do WARP")
+            return False
+        
+        # 5. Configurar proxy URL e verificar trace real
         self.proxy_url = f"http://127.0.0.1:{port}"
         self.current_method = "WARP"
         
-        # Verificar via Cloudflare trace (igual ao warpCheck do original)
         new_ip = self.get_current_ip(use_proxy=True)
         if new_ip:
             self.current_ip = new_ip
             return True
         
+        logger.error("  ❌ WARP conectou mas requisições no proxy não validaram com sucesso")
         return False
     
-    def rotate_warp_ip(self) -> Tuple[bool, str]:
+    def rotate_warp_ip(self, max_attempts: int = 3) -> Tuple[bool, str]:
         """
-        Rotaciona IP do WARP (igual ao warpRotate() + warpUp() do original C++).
-        
-        Original C++ faz:
-          1. warpCall("disconnect")
-          2. warpCall("registration delete")
-          3. warpCall("registration new")  ← falha = aborta
-          4. warpUp() → mode proxy → proxy port → connect → poll → verify
+        Rotaciona IP do WARP com validação real de mudança de endereço.
+        Garante que só retorna True se o novo IP for comprovadamente diferente do anterior.
         """
         logger.info("🔄 Rotacionando IP WARP...")
-        
         old_ip = self.current_ip
         
-        try:
-            # PASSO 1: Desconectar (igual ao original: disconnect first so the old tunnel is gone)
-            logger.info("  [1/3] Desconectando WARP...")
-            self.warp_call(['disconnect'])
-            
-            # PASSO 2: Deletar registro antigo
-            logger.info("  [2/3] Deletando registro antigo...")
-            self.warp_call(['registration', 'delete'])
-            
-            # PASSO 3: Criar novo registro (falha = aborta, igual ao original)
-            logger.info("  [3/3] Criando novo registro...")
-            result = self.warp_call(['registration', 'new'], timeout=15)
-            if result.returncode != 0:
-                logger.error(f"  ❌ warp-cli registration new failed: {result.stderr}")
-                return False, "warp-cli registration new failed"
-            
-            # PASSO 4: warpUp() - reconfigura tudo e reconecta
-            logger.info("  Reconfigurando e reconectando (warpUp)...")
-            if self.warp_up():
-                new_ip = self.current_ip
-                if new_ip != old_ip:
-                    logger.info(f"✅ IP rotacionado: {old_ip} → {new_ip}")
-                    return True, f"IP rotacionado para {new_ip}"
-                else:
-                    logger.info(f"✅ Registro renovado (IP mantido: {new_ip})")
-                    return True, f"Registro renovado - IP: {new_ip}"
-            else:
-                logger.error("  ❌ warpUp falhou - proxy não respondeu")
-                return False, "Falha ao verificar novo IP após reconexão"
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"  Tentativa {attempt}/{max_attempts} de renovação de rota...")
                 
-        except Exception as e:
-            logger.error(f"❌ Erro ao rotacionar IP: {e}")
-            return False, str(e)
-    
-    def connect_tor(self) -> Tuple[bool, str]:
-        """Conecta via Tor (placeholder)"""
-        logger.info("🧅 Tor ainda não implementado")
-        return False, "Tor ainda não implementado nesta versão"
-    
-    def connect_proxy(self) -> Tuple[bool, str]:
-        """Conecta via proxy HTTP (placeholder)"""
-        logger.info("🌐 Proxy ainda não implementado")
-        return False, "Proxy ainda não implementado nesta versão"
+                # Passo 1: Desconectar túnel ativo
+                self.warp_call(['disconnect'])
+                time.sleep(1)
+                
+                # Passo 2: Deletar registro de sessão anterior
+                self.warp_call(['registration', 'delete'])
+                time.sleep(1)
+                
+                # Passo 3: Gerar novo registro
+                reg_res = self.warp_call(['registration', 'new'], timeout=15)
+                if reg_res.returncode != 0:
+                    logger.error(f"  ❌ warp-cli registration new falhou: {reg_res.stderr.strip()}")
+                    time.sleep(2)
+                    continue
+                
+                # Passo 4: Subir proxy e verificar IP
+                if self.warp_up():
+                    new_ip = self.current_ip
+                    if old_ip and new_ip == old_ip:
+                        if attempt < max_attempts:
+                            logger.warning(f"  ⚠️ IP obtido é idêntico ao anterior ({new_ip}). Solicitando nova rota...")
+                            time.sleep(2)
+                            continue
+                        else:
+                            logger.warning(f"⚠️ Registro renovado mas o Cloudflare manteve o mesmo IP ({new_ip})")
+                            return False, f"IP não mudou após {max_attempts} tentativas (mantido: {new_ip})"
+                    else:
+                        logger.info(f"✅ IP rotacionado com sucesso: {old_ip or 'Nenhum'} → {new_ip}")
+                        return True, f"IP rotacionado para {new_ip}"
+                else:
+                    logger.warning(f"  ⚠️ Falha ao reestabelecer proxy na tentativa {attempt}")
+                    time.sleep(2)
+                    
+            except Exception as e:
+                logger.error(f"❌ Erro na rotação: {e}")
+                time.sleep(2)
+                
+        return False, f"Falha ao obter novo IP após {max_attempts} tentativas"
     
     def connect_direct(self) -> Tuple[bool, str]:
         """Conexão direta (sem proxy)"""
         self.proxy_url = None
         self.current_method = "Direct"
-        self.current_ip = self.get_current_ip()
-        logger.info(f"🔓 Conexão direta. IP: {self.current_ip}")
+        self.current_ip = self.get_current_ip(use_proxy=False)
+        logger.info(f"🔓 Conexão direta ativa. IP: {self.current_ip}")
         return True, "Conexão direta ativa"
     
     def connect(self, method: str) -> Tuple[bool, str]:
-        """Conecta usando método especificado"""
+        """Conecta usando método especificado (WARP ou DIRECT)"""
         method = method.upper()
         
         if method == "WARP":
             return self.connect_warp()
-        elif method == "TOR":
-            return self.connect_tor()
-        elif method == "PROXY":
-            return self.connect_proxy()
         elif method == "DIRECT":
             return self.connect_direct()
         else:
-            return False, f"Método desconhecido: {method}"
+            return False, f"Método não suportado: {method}. Métodos disponíveis: WARP, DIRECT"
     
     def disconnect(self) -> Tuple[bool, str]:
         """Desconecta método atual"""

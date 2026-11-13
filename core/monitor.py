@@ -68,52 +68,60 @@ class LogMonitor:
         log_file = None
         check_count = 0
         
-        while self.monitoring:
-            try:
-                # A cada 10 verificações, procura novo log
-                if check_count % 10 == 0:
-                    new_log = self._get_latest_log()
-                    if new_log and new_log != log_file:
-                        log_file = new_log
-                        self.last_position = 0
-                        logger.info(f"📄 Monitorando: {log_file}")
-                
-                check_count += 1
-                
-                if not log_file or not log_file.exists():
-                    time.sleep(2)
-                    continue
-                
-                # Ler novas linhas
-                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(self.last_position)
-                    new_lines = f.readlines()
-                    self.last_position = f.tell()
-                
-                # Verificar cada linha
-                for line in new_lines:
-                    if self._check_for_limits(line):
-                        logger.warning(f"🚨 LIMITE DETECTADO: {line.strip()}")
-                        
+        try:
+            while self.monitoring:
+                try:
+                    # A cada 10 verificações, procura novo log
+                    if check_count % 10 == 0:
+                        new_log = self._get_latest_log()
+                        if new_log and new_log != log_file:
+                            log_file = new_log
+                            self.last_position = 0
+                            logger.info(f"📄 Monitorando: {log_file}")
+                    
+                    check_count += 1
+                    
+                    if not log_file or not log_file.exists():
+                        time.sleep(2)
+                        continue
+                    
+                    # Ler novas linhas
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        f.seek(self.last_position)
+                        new_lines = f.readlines()
+                        self.last_position = f.tell()
+                    
+                    # Verificar cada linha
+                    limit_found = False
+                    for line in new_lines:
+                        if self._check_for_limits(line):
+                            logger.warning(f"🚨 LIMITE DETECTADO: {line.strip()}")
+                            limit_found = True
+                            break
+                    
+                    if limit_found:
+                        # Resetar flag antes de invocar callback para permitir restart limpo
+                        self.monitoring = False
                         if self.on_limit:
-                            # Chamar callback em thread separada
                             threading.Thread(
                                 target=self.on_limit,
                                 daemon=True
                             ).start()
-                        
-                        # Parar monitoramento após detectar
                         return
-                
-                time.sleep(1)
-                
-            except Exception as e:
-                logger.error(f"Erro no monitoramento: {e}")
-                time.sleep(2)
+                    
+                    time.sleep(1)
+                    
+                except Exception as e:
+                    logger.error(f"Erro no monitoramento: {e}")
+                    time.sleep(2)
+        finally:
+            self.monitoring = False
+            logger.info("⏹️ Loop de monitoramento finalizado")
     
     def start(self):
         """Inicia monitoramento"""
-        if self.monitoring:
+        # Se thread antiga ainda estiver viva, esperar ou limpar
+        if self.is_monitoring():
             logger.warning("⚠️ Monitoramento já está ativo")
             return
         
@@ -127,14 +135,15 @@ class LogMonitor:
     
     def stop(self):
         """Para monitoramento"""
-        if not self.monitoring:
+        if not self.monitoring and not (self.monitor_thread and self.monitor_thread.is_alive()):
             return
         
         self.monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=5)
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=3)
+        self.monitor_thread = None
         logger.info("⏹️ Monitoramento parado")
     
     def is_monitoring(self) -> bool:
         """Verifica se está monitorando"""
-        return self.monitoring
+        return self.monitoring and (self.monitor_thread is not None and self.monitor_thread.is_alive())

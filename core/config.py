@@ -11,16 +11,13 @@ class Config:
     """Gerencia configurações da aplicação"""
     
     DEFAULT_CONFIG = {
-        "connection_method": "WARP",  # WARP, Tor, Proxy, Direct
+        "connection_method": "WARP",  # WARP, Direct
         "auto_rotate": True,
         "auto_continue": True,
         "warp_port": 40000,
-        "tor_socks_port": 9050,
-        "tor_http_port": 8118,
         "max_retries": 3,
-        "retry_delay": 10,
-        "proxy_list_url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=protocolipport&format=text",
-        "check_ip_url": "https://api.ipify.org?format=json",
+        "retry_delay": 5,
+        "check_ip_url": "https://www.cloudflare.com/cdn-cgi/trace",
         "language": "pt_BR",
         "theme": "dark"
     }

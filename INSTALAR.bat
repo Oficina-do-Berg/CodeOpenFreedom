@@ -23,14 +23,27 @@ python --version
 echo OK - Python encontrado
 echo.
 
-echo [2/3] Instalando dependencias...
+echo [2/3] Configurando dependencias...
 echo.
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+
+set PYTHON_EXEC=python
+if not exist "venv\Scripts\python.exe" (
+    echo Criando ambiente virtual isolado (venv)...
+    python -m venv venv >nul 2>&1
+)
+
+if exist "venv\Scripts\python.exe" (
+    echo Usando ambiente virtual venv...
+    set PYTHON_EXEC=venv\Scripts\python.exe
+) else (
+    echo Usando Python global do sistema...
+)
+
+%PYTHON_EXEC% -m pip install -r requirements.txt
 echo.
 
 if errorlevel 1 (
-    echo [ERRO] Falha na instalacao!
+    echo [ERRO] Falha na instalacao das dependencias!
     echo.
     pause
     exit /b 1
@@ -38,7 +51,7 @@ if errorlevel 1 (
 
 echo [3/3] Verificando instalacao...
 echo.
-python -c "import psutil, requests; print('OK - Todas as dependencias estao prontas')"
+%PYTHON_EXEC% -c "import psutil, requests; print('OK - Todas as dependencias estao prontas')"
 echo.
 
 if errorlevel 1 (

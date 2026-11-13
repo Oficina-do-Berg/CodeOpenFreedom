@@ -133,12 +133,9 @@ def select_language():
                 print()
                 time.sleep(0.5)
                 
-                # Iniciar CLI
+                # Iniciar CLI com o mesmo interpretador Python ativo
                 clear_screen()
-                if lang_code == 'pt':
-                    os.system('python cli.py pt')
-                else:
-                    os.system('python cli.py en')
+                os.system(f'"{sys.executable}" cli.py {lang_code}')
                 break
             else:
                 # Limpar buffer para outras teclas
