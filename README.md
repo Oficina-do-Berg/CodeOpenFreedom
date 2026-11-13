@@ -1,7 +1,12 @@
-# CodeOpen
+# CodeOpenFreedom
 **by OFICINA-DO-BERG**
 
-Rotação automática de IP via WARP quando os limites do OpenCode são atingidos.
+> **Desenvolvimento Contínuo no OpenCode: Diga adeus aos bloqueios por limite de uso e erros 429.**
+
+O **CodeOpenFreedom** é um gerenciador de conexões e orquestrador de proxy local desenvolvido para garantir resiliência, estabilidade e trabalho ininterrupto no OpenCode. Ele monitora diagnósticos em tempo real e reage instantaneamente aos limites impostos pela plataforma:
+- 🔄 **Superação de Rate Limit (HTTP 429):** Rotaciona seu IP via Cloudflare WARP em ~15 segundos mantendo seus chats abertos.
+- ⚡ **Renovação de Cota (Deep Reset):** Quando a cota da conta esgota, arquiva suas conversas no Desktop com segurança e gera uma sessão zerada com novo IP para você continuar programando.
+- 🤖 **Modo Automático:** Detecta o erro nos logs em tempo real, troca o IP e retoma o OpenCode sozinho.
 
 ## ✨ Funcionalidades
 
@@ -139,8 +144,12 @@ C:\Users\SEU_USUARIO\.opencode-infinity-simple\config.json
 
 ## 📜 Licença
 
-Livre para uso pessoal.
+Distribuído sob a licença **GPL-3.0**. Consulte o arquivo [LICENSE](file:///LICENSE) para mais detalhes.
+
+## ⚖️ Aviso Legal (Disclaimer)
+
+Este projeto é uma ferramenta de código aberto independente, desenvolvida estritamente para fins educacionais, testes de resiliência de rede e gerenciamento de proxies locais. Não possui vínculo, afiliação ou endosso oficial de qualquer serviço de terceiros. O uso adequado da ferramenta é de inteira responsabilidade do usuário.
 
 ---
 
-**CodeOpen** - Rotação inteligente de IP para OpenCode 🚀
+**CodeOpenFreedom** - Rotação inteligente de IP para OpenCode 🚀
