@@ -1,62 +1,52 @@
-# 🚀 QuickStart - CodeOpen
+# QuickStart - CodeOpenFreedom
+*Oficina do Berg*
 
 ## Instalação Rápida
 
 ### Automática (Recomendado)
-```bash
+```cmd
 INSTALAR.bat
 ```
 
 ### Manual
-```bash
-pip install -r requirements.txt
-```
-
-**Depois instale o Cloudflare WARP:**
-- Download: https://1.1.1.1/
-- Abra-o pelo menos uma vez. (O CodeOpen configura o proxy na porta 40000 automaticamente).
-
-## Usar Agora
-
-```bash
-# Windows
-INICIAR.bat
-
-# Ou direto com Python
-python main.py
-```
-
-## Controles
-
-- **W/S** ou **↑/↓** = Navegar
-- **ENTER** = Selecionar
-- **ESC** = Sair
-
-## Como Usar
-
-1. Selecione **[ INICIAR OPENCODE ]**
-2. O CodeOpen vai:
-   - Conectar o WARP no modo proxy local
-   - Iniciar o OpenCode roteado pelo proxy
-   - Monitorar limites em tempo real
-   - Rotacionar o IP automaticamente quando atingir o limite
-
-## Troubleshooting
-
-**Interface piscando?**
-→ Use Windows Terminal: https://aka.ms/terminal
-
-**WARP não conecta?**
-```bash
-warp-cli disconnect
-warp-cli connect
-```
-
-**Falta alguma lib?**
-```bash
+```cmd
 pip install -r requirements.txt
 ```
 
 ---
 
-✨ **CodeOpen** by OFICINA-DO-BERG
+## Passo Fundamental: Cloudflare WARP
+
+1. Baixe e instale o cliente oficial: https://1.1.1.1/
+2. **OBRIGATÓRIO:** Abra o aplicativo do Cloudflare WARP e **ligue-o (deixe conectado)** antes de executar o script.
+3. Não precisa configurar portas ou proxy manualmente; o CodeOpenFreedom cuida do roteamento na porta local 40000 de forma automática.
+
+---
+
+## Como Iniciar
+
+Abra o Cloudflare WARP, certifique-se de que está conectado e execute:
+
+```cmd
+INICIAR.bat
+```
+*(Ou execute diretamente: `python main.py`)*
+
+---
+
+## Controles de Navegação
+
+* **W / S** ou **↑ / ↓**: Navegar pelas opções
+* **ENTER**: Selecionar opção
+* **ESC**: Sair
+
+---
+
+## Fluxo de Operação
+
+1. Selecione **[ INICIAR OPENCODE ]**
+2. O CodeOpenFreedom irá:
+   * Estabelecer o proxy local via WARP na porta 40000
+   * Iniciar o OpenCode CLI roteado pelo túnel seguro
+   * Monitorar streams de requisições e status HTTP 429
+   * Rotacionar o IP automaticamente quando atingir o limite

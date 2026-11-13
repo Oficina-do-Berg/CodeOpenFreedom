@@ -105,6 +105,10 @@ flowchart LR
 * **Cloudflare WARP:** Cliente oficial instalado ([Download WARP](https://1.1.1.1/))
 * **OpenCode CLI:** Instalado globalmente via npm (`npm install -g @opencode/cli`)
 
+> [!IMPORTANT]
+> **Etapa Obrigatória Antes de Executar o Script:**  
+> Abra o aplicativo oficial do **Cloudflare WARP** no Windows e certifique-se de **ativá-lo (ligar a conexão)** antes de iniciar o CodeOpenFreedom. O script gerencia o tráfego a partir do daemon ativo do WARP para estabelecer o proxy local na porta 40000 e orquestrar as renovações de IP.
+
 ### Procedimento de Instalação
 
 1. Clone o repositório localmente:
@@ -124,6 +128,10 @@ INSTALAR.bat
 ## Guia de Utilização
 
 ### Inicialização
+
+> [!NOTE]
+> Lembre-se: o **Cloudflare WARP** deve estar aberto e **ligado (conectado)** no Windows antes de inicializar o aplicativo.
+
 Para carregar o console interativo, execute o utilitário de entrada:
 ```cmd
 INICIAR.bat
@@ -192,9 +200,15 @@ CodeOpenFreedom/
 ## Perguntas Frequentes
 
 <details>
+<summary><strong>Preciso abrir e ligar o Cloudflare WARP antes de iniciar o script?</strong></summary>
+<br>
+<strong>Sim, obrigatoriamente.</strong> O aplicativo do Cloudflare WARP deve estar aberto e conectado no Windows antes de você executar o script. O CodeOpenFreedom utiliza o daemon ativo do WARP para habilitar o proxy local na porta 40000 e efetuar as trocas automáticas de IP.
+</details>
+
+<details>
 <summary><strong>É necessário configurar portas ou parâmetros de proxy manualmente?</strong></summary>
 <br>
-Não. O CodeOpenFreedom configura automaticamente os parâmetros de proxy local na porta 40000 e estabelece os vínculos de ambiente necessários. É requerido apenas que o cliente Cloudflare WARP esteja instalado na estação de trabalho.
+Não. O CodeOpenFreedom configura automaticamente os parâmetros de proxy local na porta 40000 e estabelece os vínculos de ambiente necessários. É requerido apenas que o cliente Cloudflare WARP esteja instalado na estação de trabalho e conectado.
 </details>
 
 <details>

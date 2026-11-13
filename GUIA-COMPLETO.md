@@ -11,7 +11,7 @@
 ✅ **Cloudflare WARP**
    - Baixe em: https://1.1.1.1/
    - Instale normalmente
-   - Abra o app WARP pelo menos uma vez
+   - **OBRIGATÓRIO:** Abra o aplicativo Cloudflare WARP e **ligue-o (deixe conectado)** antes de iniciar o script!
 
 ✅ **OpenCode** (se ainda não tiver)
    - Abra PowerShell e digite: `npm install -g @opencode/cli`
@@ -40,6 +40,8 @@ cd "c:\Users\berg\Desktop\OPENCODE INFINITE TESTE\opencode-infinity-simple"
 ---
 
 ## PASSO 3: INICIAR O PROGRAMA
+
+> **AVISO OBRIGATÓRIO:** Antes de iniciar o programa, abra o aplicativo **Cloudflare WARP** e certifique-se de que ele está **ligado / conectado**.
 
 ### Opção A: Via Launcher (Recomendado)
 ```powershell

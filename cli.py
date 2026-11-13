@@ -241,13 +241,14 @@ class CodeOpenCLI:
             else:
                 if not self.connection.check_warp_installed():
                     print(f"  {RED}ERRO: Cloudflare WARP não foi encontrado!{RESET}")
-                    print(f"  {WHITE}Baixe e instale gratuitamente em: {RED}https://1.1.1.1/{RESET}")
-                    print(f"  {DIM_WHITE}(Abra o WARP pelo menos uma vez após instalar){RESET}\n")
+                    print(f"  {WHITE}Baixe e instale gratuitamente em: {RED}https://1.1.1.1/{RESET}\n")
                 elif not self.opencode.find_opencode():
                     print(f"  {RED}ERRO: OpenCode não foi encontrado!{RESET}")
                     print(f"  {WHITE}Instale com: {RED}npm install -g @opencode/cli{RESET}\n")
                 else:
-                    print(f"  {DIM_WHITE}ERRO - Falha ao iniciar. Verifique os logs em ~/.opencode-infinity-simple/app.log{RESET}\n")
+                    print(f"  {RED}ERRO: Falha ao estabelecer conexão com o proxy WARP.{RESET}")
+                    print(f"  {WHITE}Certifique-se de que o aplicativo Cloudflare WARP está ABERTO e LIGADO.{RESET}")
+                    print(f"  {DIM_WHITE}Verifique também os logs em ~/.opencode-infinity-simple/app.log{RESET}\n")
         
         print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
         msvcrt.getch()
@@ -342,7 +343,8 @@ class CodeOpenCLI:
             
             print(f"  {RED}5. REQUISITOS (CLOUDFLARE WARP & PROXY):{RESET}")
             print(f"     {WHITE}• Precisa do Cloudflare WARP instalado: {RED}https://1.1.1.1/{RESET}")
-            print(f"     {WHITE}• NÃO é necessário configurar proxy ou porta 40000 manualmente!{RESET}")
+            print(f"     {BOLD_RED}• OBRIGATÓRIO:{RESET} {WHITE}Abra o Cloudflare WARP e ligue-o antes de usar o script!{RESET}")
+            print(f"     {WHITE}• NÃO é necessário configurar proxy ou porta 40000 manualmente:{RESET}")
             print(f"     {DIM_WHITE}  O CodeOpen configura o modo proxy e a porta 40000 de forma{RESET}")
             print(f"     {DIM_WHITE}  100% automática através do comando warp-cli.{RESET}\n")
         else:
@@ -370,7 +372,8 @@ class CodeOpenCLI:
             
             print(f"  {RED}5. REQUIREMENTS (WARP & PROXY PORT 40000):{RESET}")
             print(f"     {WHITE}• Requires Cloudflare WARP installed: {RED}https://1.1.1.1/{RESET}")
-            print(f"     {WHITE}• NO manual proxy or port configuration is needed!{RESET}")
+            print(f"     {BOLD_RED}• MANDATORY:{RESET} {WHITE}Open Cloudflare WARP and connect it before starting!{RESET}")
+            print(f"     {WHITE}• NO manual proxy or port configuration is needed:{RESET}")
             print(f"     {DIM_WHITE}  CodeOpen configures proxy mode on local port 40000 100%{RESET}")
             print(f"     {DIM_WHITE}  automatically through warp-cli commands.{RESET}\n")
             

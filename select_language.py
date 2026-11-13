@@ -70,6 +70,7 @@ def draw_menu(current, options):
     
     print()
     print(f"  {DIM_WHITE}Use {RED}W/S{RESET} {DIM_WHITE}ou{RESET} {RED}↑/↓{RESET} {DIM_WHITE}|{RESET} {RED}ENTER{RESET} {DIM_WHITE}para selecionar{RESET}")
+    print(f"  {DIM_WHITE}Nota: O Cloudflare WARP deve estar ABERTO e LIGADO antes de iniciar.{RESET}")
 
 
 def select_language():
