@@ -1,206 +1,229 @@
 <div align="center">
 
-# ⚡ CodeOpenFreedom
-### *Smart Connection Manager & Rate Limit Recovery for OpenCode CLI*
-**Desenvolvido com excelência por OFICINA-DO-BERG**
+# CodeOpenFreedom
+### Gerenciador de Conectividade e Resiliência para OpenCode CLI
+**Desenvolvido por OFICINA-DO-BERG**
 
 <p align="center">
   <a href="https://github.com/Oficina-do-Berg/CodeOpenFreedom/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge" alt="GPL-3.0 License">
+    <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square" alt="Licença GPL-3.0">
   </a>
-  <img src="https://img.shields.io/badge/Python-3.8+-3776AB.svg?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?style=for-the-badge&logo=windows&logoColor=white" alt="Windows 10/11">
-  <img src="https://img.shields.io/badge/Cloudflare-WARP%20Proxy-F38020.svg?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Cloudflare WARP">
-  <img src="https://img.shields.io/badge/Status-100%25%20Funcional-success.svg?style=for-the-badge" alt="Status">
+  <img src="https://img.shields.io/badge/Python-3.8+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6.svg?style=flat-square&logo=windows&logoColor=white" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/Rede-Cloudflare%20WARP%20Proxy-F38020.svg?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare WARP">
+  <img src="https://img.shields.io/badge/Build-Estável-2ea44f.svg?style=flat-square" alt="Status Estável">
 </p>
 
-> **Diga adeus às pausas forçadas por limites de requisições, cotas esgotadas e erros HTTP 429 no OpenCode.**
+<p align="center">
+  <a href="#visão-geral">Visão Geral</a> •
+  <a href="#recursos-principais">Recursos Principais</a> •
+  <a href="#comparativo-técnico">Comparativo</a> •
+  <a href="#arquitetura-do-sistema">Arquitetura</a> •
+  <a href="#instalação-e-requisitos">Instalação</a> •
+  <a href="#guia-de-utilização">Uso</a> •
+  <a href="#aviso-legal">Aviso Legal</a>
+</p>
 
-[Instalação Rápida](#-instalação-rápida) • [Como Funciona](#-como-funciona) • [Funcionalidades](#-cards-de-funcionalidades) • [Comparativo](#-comparativo) • [Aviso Legal](#-aviso-legal-disclaimer)
+<br>
 
----
+<p align="center">
+  <img src="assets/terminal-preview.png" alt="Interface do Terminal do CodeOpenFreedom" width="850">
+</p>
 
 </div>
 
-## 📌 Visão Geral
+---
 
-O **CodeOpenFreedom** é um gerenciador de conexões leve, modular e automatizado para desenvolvedores que utilizam o **OpenCode**. 
+## Visão Geral
 
-Ele atua como uma camada inteligente entre a sua máquina e as APIs do OpenCode: roteia as requisições através de um proxy local no **Cloudflare WARP (porta 40000)**, monitora logs em tempo real e reage instantaneamente a qualquer bloqueio ou cota excedida, mantendo o seu fluxo de programação 100% contínuo.
+O **CodeOpenFreedom** é uma camada de resiliência e gerenciamento de conectividade projetada para desenvolvedores que utilizam a interface de linha de comando do **OpenCode** em sistemas Windows.
+
+Atuando de maneira transparente entre o terminal e as APIs externas, a ferramenta estabelece um túnel proxy local via **Cloudflare WARP (porta local 40000)**, monitora streams de telemetria em tempo de execução e mitiga interrupções provocadas por exaustão temporária de limites de requisição (HTTP 429), garantindo continuidade operacional ao fluxo de trabalho de engenharia de software.
 
 ---
 
-## 🎴 Cards de Funcionalidades
+## Recursos Principais
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>🔄 Rotação Automática de IP</h3>
-      Ao detectar erros de taxa (<strong>HTTP 429</strong>, <em>rate limit exceeded</em> ou <em>too many requests</em>), o motor renova a identidade Cloudflare e estabelece uma nova rota em ~15 segundos sem fechar seu terminal.
+      <h4>Rotação Dinâmica de Conexão</h4>
+      <p>Monitoramento contínuo de erros de resposta (como <code>HTTP 429</code>, <code>rate limit exceeded</code> ou <code>too many requests</code>). Ao detectar saturação, o subsistema orquestra a renovação de registro da sessão em aproximadamente 15 segundos sem encerrar o processo do terminal.</p>
     </td>
     <td width="50%" valign="top">
-      <h3>⚡ Deep Reset com Proteção</h3>
-      Quando a cota da conta esgota, o app faz backup do seu banco de dados de conversas (<code>opencode.db</code>) no <strong>Desktop</strong>, renova tokens e zera o contador para um novo início limpo.
+      <h4>Isolamento e Backup de Sessões</h4>
+      <p>Procedimento de reinicialização controlada com salvaguarda preventiva. O banco de dados de sessões e conversas locais é arquivado com registro de data e hora (timestamp) em diretório dedicado antes de qualquer reset de estado operacional.</p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🤖 Modo Piloto Automático</h3>
-      Com apenas 1 clique em <code>[ INICIAR OPENCODE ]</code>, o aplicativo liga o túnel WARP, inicia o OpenCode e ativa um vigia em thread paralela para que você programe sem interrupções.
+      <h4>Orquestração Automatizada</h4>
+      <p>Elimina intervenções manuais de configuração de rede. A aplicação ajusta os parâmetros de modo proxy e alocação de portas locais de forma autônoma, validando a integridade das interfaces de rede antes da inicialização do serviço.</p>
     </td>
     <td width="50%" valign="top">
-      <h3>🛡️ Zero Configuração Manual</h3>
-      O aplicativo executa todos os comandos de rede (<code>mode proxy</code> e <code>proxy port 40000</code>) de forma 100% automática. Instale o WARP oficial e deixe o CodeOpen cuidar do resto.
+      <h4>Interface TUI Otimizada</h4>
+      <p>Desenvolvida para alta responsividade no Windows Terminal e PowerShell nativo. Apresenta telemetria contínua com indicadores em tempo real de status da conexão, endereço IP em trânsito e estado de execução do daemon.</p>
     </td>
   </tr>
 </table>
 
 ---
 
-## 📊 Comparativo: Por que usar o CodeOpenFreedom?
+## Comparativo Técnico
 
-| Desafio | Sem o CodeOpenFreedom ❌ | Com o CodeOpenFreedom ⚡ |
+A tabela abaixo sumariza as diferenças operacionais entre o fluxo padrão de execução do OpenCode CLI e a arquitetura gerenciada pelo CodeOpenFreedom:
+
+| Cenário Operacional | Fluxo Padrão (Sem CodeOpenFreedom) | Com CodeOpenFreedom |
 | :--- | :--- | :--- |
-| **Erro 429 (Rate Limit)** | Trabalho bloqueado por horas ou dias | IP rotacionado em 15 segundos automaticamente |
-| **Cota Esgotada** | Perda de tempo esperando renovação | Deep reset seguro com novo IP e histórico preservado |
-| **Segurança das Conversas** | Risco de corromper ou perder chats antigos | Backup automático com timestamp no Desktop |
-| **Configuração de Proxy** | Comandos manuais chatos no terminal | 100% automatizado na porta local 40000 |
-| **Interface do Usuário** | Terminal que trava ou pisca | TUI nativa e suave (Windows Terminal / PowerShell) |
+| **Exaustão de Taxa (HTTP 429)** | Processo bloqueado; requer espera indeterminada | Rotação automática de rota em ~15 segundos |
+| **Saturação de Cota** | Interrupção manual do fluxo de desenvolvimento | Reset controlado com nova rota e histórico protegido |
+| **Integridade de Dados** | Risco de perda de histórico em limpezas manuais | Backup estruturado automático com marcação temporal |
+| **Configuração de Proxy** | Comandos manuais frequentes no console | Roteamento automático através da porta local 40000 |
+| **Estabilidade Visual** | Terminais suscetíveis a flicker e concorrência | TUI assíncrona, suave e estável no Windows Terminal |
 
 ---
 
-## 🏗️ Arquitetura do Sistema
+## Arquitetura do Sistema
 
 ```mermaid
 flowchart LR
-    A[OpenCode CLI] -->|HTTP / HTTPS Proxy :40000| B[Cloudflare WARP Engine]
-    B -->|Túnel Criptografado| C[APIs OpenCode / AI]
-    D[Monitor de Logs] -.->|Vigia erros 429 & limites| A
-    D -->|Limite Detectado| E[Orquestrador de Rotação]
-    E -->|Renova Registro & Proxy| B
-    E -->|Restaura Conexão| A
+    A["OpenCode CLI"] -->|"Proxy Local :40000"| B["Cloudflare WARP Engine"]
+    B -->|"Túnel Seguro"| C["Endpoints da API"]
+    D["Monitor de Telemetria"] -.->|"Inspeção de Streams (HTTP 429)"| A
+    D -->|"Acionamento em Falha"| E["Módulo de Rotação"]
+    E -->|"Renovação de Conexão"| B
+    E -->|"Reconexão Transparente"| A
 ```
 
 ---
 
-## 🚀 Instalação Rápida
+## Instalação e Requisitos
 
-### 1️⃣ Pré-requisitos
-* **Python 3.8+** ([Download](https://www.python.org/downloads/))
-* **Cloudflare WARP** ([Download Gratuito](https://1.1.1.1/)) — *Instale e abra-o pelo menos uma vez.*
-* **OpenCode CLI** (`npm install -g @opencode/cli`)
+### Pré-requisitos
+* **Sistema Operacional:** Windows 10 ou Windows 11 (64-bit)
+* **Python:** Versão 3.8 ou superior ([Download Python](https://www.python.org/downloads/))
+* **Cloudflare WARP:** Cliente oficial instalado ([Download WARP](https://1.1.1.1/))
+* **OpenCode CLI:** Instalado globalmente via npm (`npm install -g @opencode/cli`)
 
-### 2️⃣ Instalar Dependências (1 Clique)
-Basta dar dois cliques no instalador do projeto:
-```bat
+### Procedimento de Instalação
+
+1. Clone o repositório localmente:
+```cmd
+git clone https://github.com/Oficina-do-Berg/CodeOpenFreedom.git
+cd CodeOpenFreedom
+```
+
+2. Execute o instalador automatizado:
+```cmd
 INSTALAR.bat
 ```
-> *Ou manualmente via terminal:* `pip install -r requirements.txt`
+> Alternativamente, instale as dependências via Python diretamente: `pip install -r requirements.txt`
 
 ---
 
-## 🎮 Como Usar
+## Guia de Utilização
 
-### Início Rápido (Recomendado)
-Dê dois cliques no inicializador:
-```bat
+### Inicialização
+Para carregar o console interativo, execute o utilitário de entrada:
+```cmd
 INICIAR.bat
 ```
-*(Ou execute `python main.py` no seu terminal)*
+*(Ou execute `python main.py` através do seu emulador de terminal preferido).*
 
-### Menu Interativo
+### Painel de Controle
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
 │                    CODEOPENFREEDOM                         │
-│                   by OFICINA-DO-BERG                       │
+│                   OFICINA DO BERG                          │
 │                                                            │
 │   Conexao: WARP (2a09:bac5:...) | OpenCode: ATIVO          │
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
-│   > [ 🟢 INICIAR OPENCODE ]  (ou [ 🔴 PARAR OPENCODE ])    │
-│     [ 🔄 ROTACIONAR IP ]                                   │
-│     [ ⚠️ RESET PROFUNDO ]                                  │
-│     [ 💡 AJUDA ]                                           │
-│     [ 🚪 SAIR ]                                            │
+│   > [ INICIAR OPENCODE ]  (ou [ PARAR OPENCODE ])          │
+│     [ ROTACIONAR IP ]                                      │
+│     [ RESET PROFUNDO ]                                     │
+│     [ AJUDA ]                                              │
+│     [ SAIR ]                                               │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
 ```
 
-### ⌨️ Controles
-| Tecla | Função |
+### Controles de Navegação
+
+| Tecla de Entrada | Ação Correspondente |
 | :---: | :--- |
-| **W** ou **↑** | Subir seleção no menu |
-| **S** ou **↓** | Descer seleção no menu |
-| **ENTER** | Executar opção selecionada |
-| **ESC** | Sair do aplicativo |
+| **W** ou **Seta para Cima (↑)** | Desloca a seleção para o item superior |
+| **S** ou **Seta para Baixo (↓)** | Desloca a seleção para o item inferior |
+| **ENTER** | Confirma e executa o módulo selecionado |
+| **ESC** | Encerra a aplicação de forma segura |
 
 ---
 
-## 📂 Estrutura do Projeto
+## Estrutura do Repositório
 
 ```text
-opencode-infinity-simple/
+CodeOpenFreedom/
+├── assets/
+│   └── terminal-preview.png # Amostra visual de alta definição da interface TUI
 ├── core/
-│   ├── config.py          # Configurações do app e persistência
-│   ├── connection.py      # Automação de rede e Cloudflare WARP CLI
-│   ├── opencode.py        # Ciclo de vida do OpenCode, auth e banco de chats
-│   ├── rotator.py         # Motor de rotação e contingência
-│   ├── monitor.py         # Vigia de logs multithread (11 padrões de erro)
-│   └── orchestrator.py    # Orquestrador do fluxo automático
+│   ├── config.py            # Gerenciamento de parâmetros e persistência local
+│   ├── connection.py        # Automação de interface de rede e Cloudflare WARP CLI
+│   ├── opencode.py          # Gestão do ciclo de vida, arquivos de sessão e backups
+│   ├── rotator.py           # Orquestrador de failover e rotação dinâmica de IP
+│   ├── monitor.py           # Thread de observabilidade e captura de padrões de erro
+│   └── orchestrator.py      # Controlador de processos e sincronização de eventos
 ├── utils/
-│   ├── logger.py          # Sistema de logs com rotação
-│   └── helpers.py         # Validadores de IP e rede
-├── cli.py                 # Interface do menu interativo
-├── main.py                # Ponto de entrada padrão Python
-├── select_language.py     # Seletor interativo de idioma (PT/EN)
-├── INICIAR.bat            # Launcher rápido de 1 clique
-├── INSTALAR.bat           # Instalador automático de dependências
-├── requirements.txt       # Dependências essenciais (psutil, requests)
-├── test_sistema.py        # Script de diagnóstico geral do sistema
-├── test_reset.py          # Script de validação do Deep Reset
-└── README.md              # Documentação oficial
+│   ├── logger.py            # Subsistema de registro rotativo de eventos
+│   └── helpers.py           # Utilitários de verificação de conectividade e rede
+├── cli.py                   # Renderização e manipulação da interface TUI
+├── main.py                  # Ponto de entrada da aplicação
+├── select_language.py       # Seletor de idioma de inicialização (PT / EN)
+├── INICIAR.bat              # Script executável de inicialização rápida
+├── INSTALAR.bat             # Script de validação e instalação do ambiente Python
+├── requirements.txt         # Especificação de dependências mínimas (psutil, requests)
+├── test_sistema.py          # Script de testes e diagnóstico ambiental
+├── test_reset.py            # Script de validação de rotinas de reset e backup
+└── README.md                # Documentação técnica oficial
 ```
 
 ---
 
-## ❓ Perguntas Frequentes (FAQ)
+## Perguntas Frequentes
 
 <details>
-<summary><strong>Preciso configurar a porta 40000 ou proxy manualmente no WARP?</strong></summary>
+<summary><strong>É necessário configurar portas ou parâmetros de proxy manualmente?</strong></summary>
 <br>
-<strong>Não!</strong> O CodeOpenFreedom envia os comandos <code>warp-cli mode proxy</code> e <code>warp-cli proxy port 40000</code> de forma invisível. Você só precisa ter o app do WARP instalado no seu Windows.
+Não. O CodeOpenFreedom configura automaticamente os parâmetros de proxy local na porta 40000 e estabelece os vínculos de ambiente necessários. É requerido apenas que o cliente Cloudflare WARP esteja instalado na estação de trabalho.
 </details>
 
 <details>
-<summary><strong>O Deep Reset apaga as minhas conversas anteriores?</strong></summary>
+<summary><strong>A rotina de Reset Profundo remove histórico ou sessões anteriores?</strong></summary>
 <br>
-<strong>Não!</strong> Antes de resetar as credenciais da conta, o aplicativo copia e move com segurança o seu banco de dados de conversas para a pasta <code>Desktop\opencode_chats_archiviate\&lt;data_hora&gt;</code>.
+Não de forma destrutiva. Antes de qualquer redefinição de tokens ou credenciais locais, o sistema realiza uma cópia integral do banco de dados de sessões para o diretório <code>Desktop\opencode_chats_archiviate\&lt;data_hora&gt;</code>, preservando seus dados.
 </details>
 
 <details>
-<summary><strong>O que fazer se o terminal estiver piscando?</strong></summary>
+<summary><strong>Qual emulador de terminal é recomendado para execução?</strong></summary>
 <br>
-Recomendamos utilizar o <strong>Windows Terminal</strong> (oficial da Microsoft, disponível na Microsoft Store). Nele, o CodeOpenFreedom roda com renderização ANSI suave e sem oscilações.
+Recomenda-se o uso do <strong>Windows Terminal</strong> (disponível gratuitamente na Microsoft Store), que oferece suporte integral a sequências de escape ANSI modernas, renderização acelerada por GPU e ausência de tremulação (flicker).
 </details>
 
 ---
 
-## 🤝 Créditos & Agradecimentos
+## Créditos
 
-* **Desenvolvido por:** [OFICINA-DO-BERG](https://github.com/Oficina-do-Berg)
-* **Inspirado no projeto base:** OpenCode Infinite
+* **Desenvolvimento e Manutenção:** [OFICINA-DO-BERG](https://github.com/Oficina-do-Berg)
+* **Base Conceitual:** Iniciativas de automação de fluxo OpenCode CLI
 
 ---
 
-## 📜 Licença
+## Licença
 
-Distribuído sob a licença **GPL-3.0**. Consulte o arquivo [LICENSE](LICENSE) para termos completos de uso e redistribuição.
+Este projeto é distribuído sob os termos da licença **GPL-3.0**. Para detalhes completos sobre direitos de distribuição e modificação, consulte o arquivo [LICENSE](LICENSE).
 
-## ⚖️ Aviso Legal (Disclaimer)
+---
 
-Este projeto é uma ferramenta de código aberto independente, desenvolvida estritamente para fins educacionais, testes de resiliência de rede e gerenciamento de proxies locais. Não possui vínculo, afiliação ou endosso oficial de qualquer serviço de terceiros citado. O uso responsável da ferramenta é de inteira responsabilidade do usuário.
+## Aviso Legal
 
-<div align="center">
-  <sub>Feito com dedicação por <b>OFICINA-DO-BERG</b>. Se este projeto te ajudou, deixe uma ⭐ no repositório!</sub>
-</div>
+Este software é um utilitário independente e de código aberto desenvolvido com propósitos estritamente técnicos, educacionais e de gerenciamento de conectividade de rede local. Não possui qualquer vínculo institucional, patrocínio ou afiliação oficial com entidades gestoras de serviços externos citados. O operador é o único responsável pela utilização compatível com as diretrizes e termos de serviços pertinentes.
