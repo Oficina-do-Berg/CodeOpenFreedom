@@ -50,7 +50,9 @@ if errorlevel 1 (
     echo ===================================================
     echo.
     echo Proximos passos:
-    echo 1. Instale Cloudflare WARP: https://1.1.1.1/
+    echo 1. Certifique-se de ter o Cloudflare WARP instalado: https://1.1.1.1/
+    echo    (NOTA: Voce NAO precisa configurar proxy ou porta 40000 manualmente.
+    echo     O CodeOpen configura o proxy local 40000 de forma 100% automatica!)
     echo 2. Execute: INICIAR.bat
     echo.
 )

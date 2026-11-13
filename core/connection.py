@@ -89,47 +89,22 @@ class ConnectionManager:
         return False
     
     def connect_warp(self) -> Tuple[bool, str]:
-        """Conecta via WARP"""
+        """
+        Conecta via WARP (igual ao warpUp() do original C++).
+        Faz: check service → registration show → mode proxy → proxy port → connect → poll → verify
+        """
         logger.info("🔌 Conectando via WARP...")
         
         if not self.check_warp_installed():
             return False, "WARP não está instalado"
         
         try:
-            # Verificar status
-            result = subprocess.run(
-                [self.warp_cli, 'status'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            if self.warp_up():
+                logger.info(f"✅ WARP conectado! IP: {self.current_ip}")
+                return True, f"Conectado via WARP - IP: {self.current_ip}"
+            else:
+                return False, "WARP conectou mas não passou no trace check"
             
-            # Se não conectado, conectar
-            if 'Connected' not in result.stdout:
-                subprocess.run(
-                    [self.warp_cli, 'connect'],
-                    capture_output=True,
-                    timeout=30
-                )
-                time.sleep(5)
-            
-            # Configurar modo proxy
-            port = self.config.get('warp_port', 40000)
-            subprocess.run(
-                [self.warp_cli, 'mode', 'proxy'],
-                capture_output=True,
-                timeout=10
-            )
-            
-            self.proxy_url = f"http://127.0.0.1:{port}"
-            self.current_method = "WARP"
-            self.current_ip = self.get_current_ip()
-            
-            logger.info(f"✅ WARP conectado! IP: {self.current_ip}")
-            return True, "Conectado via WARP"
-            
-        except subprocess.TimeoutExpired:
-            return False, "Timeout ao conectar WARP"
         except Exception as e:
             logger.error(f"Erro ao conectar WARP: {e}")
             return False, str(e)
@@ -149,77 +124,111 @@ class ConnectionManager:
         except Exception as e:
             return False, str(e)
     
+    def warp_call(self, args: list, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Executa warp-cli com --accept-tos (igual ao original C++)"""
+        cmd = [self.warp_cli, '--accept-tos'] + args
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            return result
+        except subprocess.TimeoutExpired:
+            logger.warning(f"  ⚠️ Timeout: warp-cli {' '.join(args)}")
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout='', stderr='timeout')
+        except Exception as e:
+            logger.error(f"  ❌ Erro warp-cli: {e}")
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout='', stderr=str(e))
+
+    def warp_up(self) -> bool:
+        """
+        Configura e conecta WARP após novo registro (igual ao warpUp() do original C++).
+        Faz: registration show → mode proxy → proxy port → connect → poll status → verify trace
+        """
+        port = self.config.get('warp_port', 40000)
+        
+        # Verificar se registro existe, se não criar
+        result = self.warp_call(['registration', 'show'])
+        if result.returncode != 0 or 'Missing' in result.stdout:
+            self.warp_call(['registration', 'new'], timeout=15)
+        
+        # Configurar modo proxy (ESSENCIAL - o original sempre faz isso!)
+        logger.info("  Configurando modo proxy...")
+        self.warp_call(['mode', 'proxy'])
+        self.warp_call(['proxy', 'port', str(port)])
+        
+        # Conectar
+        logger.info("  Conectando WARP...")
+        self.warp_call(['connect'], timeout=30)
+        
+        # Poll status até conectar (igual ao original: loop com warpCall("status"))
+        wait_secs = 15
+        logger.info(f"  Aguardando conexão (até {wait_secs}s)...")
+        for i in range(wait_secs):
+            result = self.warp_call(['status'])
+            if result.returncode == 0 and 'Connected' in result.stdout:
+                logger.info(f"  ✅ WARP conectado após {i+1}s")
+                break
+            time.sleep(1)
+        
+        # Configurar proxy URL
+        self.proxy_url = f"http://127.0.0.1:{port}"
+        self.current_method = "WARP"
+        
+        # Verificar via Cloudflare trace (igual ao warpCheck do original)
+        new_ip = self.get_current_ip(use_proxy=True)
+        if new_ip:
+            self.current_ip = new_ip
+            return True
+        
+        return False
+    
     def rotate_warp_ip(self) -> Tuple[bool, str]:
-        """Rotaciona IP do WARP (igual ao original opencode-infinite)"""
+        """
+        Rotaciona IP do WARP (igual ao warpRotate() + warpUp() do original C++).
+        
+        Original C++ faz:
+          1. warpCall("disconnect")
+          2. warpCall("registration delete")
+          3. warpCall("registration new")  ← falha = aborta
+          4. warpUp() → mode proxy → proxy port → connect → poll → verify
+        """
         logger.info("🔄 Rotacionando IP WARP...")
         
         old_ip = self.current_ip
         
         try:
-            # PASSO 1: Desconectar PRIMEIRO (igual ao original)
-            logger.info("  [1/4] Desconectando WARP...")
-            subprocess.run(
-                [self.warp_cli, 'disconnect'],
-                capture_output=True,
-                timeout=10
-            )
-            time.sleep(2)
+            # PASSO 1: Desconectar (igual ao original: disconnect first so the old tunnel is gone)
+            logger.info("  [1/3] Desconectando WARP...")
+            self.warp_call(['disconnect'])
             
             # PASSO 2: Deletar registro antigo
-            logger.info("  [2/4] Deletando registro antigo...")
-            subprocess.run(
-                [self.warp_cli, 'registration', 'delete'],
-                capture_output=True,
-                timeout=10
-            )
-            time.sleep(3)
+            logger.info("  [2/3] Deletando registro antigo...")
+            self.warp_call(['registration', 'delete'])
             
-            # PASSO 3: Criar novo registro
-            logger.info("  [3/4] Criando novo registro...")
-            result = subprocess.run(
-                [self.warp_cli, 'registration', 'new'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
-            
+            # PASSO 3: Criar novo registro (falha = aborta, igual ao original)
+            logger.info("  [3/3] Criando novo registro...")
+            result = self.warp_call(['registration', 'new'], timeout=15)
             if result.returncode != 0:
-                logger.error(f"  ❌ Falha ao criar registro: {result.stderr}")
-                return False, "Falha ao criar novo registro"
+                logger.error(f"  ❌ warp-cli registration new failed: {result.stderr}")
+                return False, "warp-cli registration new failed"
             
-            time.sleep(3)
-            
-            # PASSO 4: Reconectar
-            logger.info("  [4/4] Reconectando...")
-            subprocess.run(
-                [self.warp_cli, 'connect'],
-                capture_output=True,
-                timeout=30
-            )
-            time.sleep(8)  # Aumentado para dar tempo do WARP estabilizar
-            
-            # Verificar novo IP (usando proxy)
-            new_ip = self.get_current_ip(use_proxy=True)
-            
-            # Nota: Às vezes o Cloudflare recicla o mesmo IP
-            # Mas o registro foi renovado, então o contador reseta
-            if new_ip:
+            # PASSO 4: warpUp() - reconfigura tudo e reconecta
+            logger.info("  Reconfigurando e reconectando (warpUp)...")
+            if self.warp_up():
+                new_ip = self.current_ip
                 if new_ip != old_ip:
-                    self.current_ip = new_ip
                     logger.info(f"✅ IP rotacionado: {old_ip} → {new_ip}")
                     return True, f"IP rotacionado para {new_ip}"
                 else:
-                    # IP igual mas registro renovado - ainda é sucesso
-                    self.current_ip = new_ip
                     logger.info(f"✅ Registro renovado (IP mantido: {new_ip})")
                     return True, f"Registro renovado - IP: {new_ip}"
             else:
-                logger.error("  ❌ Não foi possível verificar novo IP")
-                return False, "Falha ao verificar novo IP"
+                logger.error("  ❌ warpUp falhou - proxy não respondeu")
+                return False, "Falha ao verificar novo IP após reconexão"
                 
-        except subprocess.TimeoutExpired as e:
-            logger.error(f"❌ Timeout ao rotacionar: {e}")
-            return False, "Timeout na rotação"
         except Exception as e:
             logger.error(f"❌ Erro ao rotacionar IP: {e}")
             return False, str(e)

@@ -12,8 +12,9 @@ INSTALAR.bat
 pip install -r requirements.txt
 ```
 
-**Depois instale WARP:**
+**Depois instale o Cloudflare WARP:**
 - Download: https://1.1.1.1/
+- Abra-o pelo menos uma vez. (O CodeOpen configura o proxy na porta 40000 automaticamente).
 
 ## Usar Agora
 

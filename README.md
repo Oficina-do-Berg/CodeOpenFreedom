@@ -34,7 +34,8 @@ pip install -r requirements.txt
 
 3. **Instalar Cloudflare WARP:**
    - Download: https://1.1.1.1/
-   - Criar conta gratuita
+   - Instale e abra o aplicativo pelo menos uma vez para aceitar os termos.
+   - 💡 **Importante:** Você **NÃO** precisa configurar proxy nem porta 40000 manualmente. O CodeOpen configura o modo proxy na porta local 40000 de forma 100% automática via `warp-cli`.
 
 ## 🎮 Como Usar
 
