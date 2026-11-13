@@ -92,11 +92,10 @@ Você verá a tela principal:
 
 ──────────────────────────────────────────────────────────────────────
 
-  > [ MODO AUTOMATICO ]
-    [ INICIAR ]
-    [ PARAR ]
+  > [ INICIAR OPENCODE ]
     [ ROTACIONAR IP ]
-    [ CONEXAO ]
+    [ RESET PROFUNDO ]
+    [ AJUDA ]
     [ SAIR ]
 
   Use W/S ou ↑/↓ | ENTER | ESC para sair

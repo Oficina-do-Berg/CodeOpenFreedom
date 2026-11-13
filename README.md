@@ -7,10 +7,11 @@ Rotação automática de IP via WARP quando os limites do OpenCode são atingido
 
 - ✅ Rotação automática de IP via WARP
 - ✅ Monitoramento de logs em tempo real  
-- ✅ Detecção automática de limites (11 padrões)
-- ✅ Interface CLI sem piscar (blessed)
-- ✅ Suporte bilíngue (PT/EN)
-- ✅ Navegação por teclado (W/S ou ↑/↓)
+- ✅ Detecção automática de limites (11 padrões de erro)
+- ✅ Reset Profundo seguro (arquiva seus chats no Desktop antes de resetar a cota)
+- ✅ Interface CLI nativa sem piscar (Windows Terminal / PowerShell)
+- ✅ Suporte bilíngue (Português / English)
+- ✅ Navegação intuitiva por teclado (W/S ou ↑/↓) e menu de Ajuda integrado
 
 ## 🚀 Instalação
 
@@ -46,7 +47,7 @@ INICIAR.bat
 
 ### Método 2: Python direto
 ```bash
-python select_language.py
+python main.py
 ```
 
 ### Método 3: CLI direto com idioma
@@ -62,25 +63,27 @@ python cli.py en   # English
 | **W** ou **↑** | Subir no menu |
 | **S** ou **↓** | Descer no menu |
 | **ENTER** | Selecionar opção |
-| **ESC** ou **Q** | Voltar/Sair |
+| **ESC** | Sair do aplicativo |
 
 ## 🔧 Estrutura
 
 ```
 opencode-infinity-simple/
 ├── core/              # Lógica principal
-│   ├── config.py      # Configurações
-│   ├── connection.py  # Gerenciamento WARP
-│   ├── opencode.py    # Controle OpenCode
-│   ├── rotator.py     # Rotação de IP
-│   ├── monitor.py     # Monitoramento logs
-│   └── orchestrator.py # Orquestração
+│   ├── config.py      # Configurações locais
+│   ├── connection.py  # Gerenciamento de rede e Cloudflare WARP
+│   ├── opencode.py    # Gerenciamento de processo, auth e chats
+│   ├── rotator.py     # Rotação de IP e Deep Reset
+│   ├── monitor.py     # Monitoramento de logs em tempo real
+│   └── orchestrator.py # Orquestração do ciclo automático
 ├── utils/             # Utilitários
 │   └── logger.py      # Sistema de logs
-├── select_language.py # Seletor de idioma
-├── cli.py             # Interface CLI principal
-├── INICIAR.bat        # Launcher Windows
-└── README.md          # Este arquivo
+├── main.py            # Ponto de entrada padrão em Python
+├── select_language.py # Seletor interativo de idioma
+├── cli.py             # Interface de terminal (TUI)
+├── INICIAR.bat        # Launcher de 1 clique para Windows
+├── INSTALAR.bat       # Instalador de dependências
+└── README.md          # Documentação principal
 ```
 
 ## 🌐 Fluxo Automático
@@ -122,10 +125,12 @@ C:\Users\SEU_USUARIO\.opencode-infinity-simple\config.json
 
 ## 📦 Versão
 
-**v2.0** - Interface Blessed (Estável)
-- ✅ Rotação de IP funcionando
-- ✅ Interface sem piscar (blessed)
-- ✅ Suporte bilíngue
+**v1.0 (Funcional)**
+- ✅ Rotação automática de IP via Cloudflare WARP com proxy na porta 40000
+- ✅ Reset Profundo seguro com preservação do banco de dados no Desktop
+- ✅ Menu dinâmico de 1 clique (Iniciar / Parar / Rotacionar / Reset / Ajuda)
+- ✅ Interface CLI sem piscar
+- ✅ Suporte bilíngue (Português / English)
 
 ## 🤝 Créditos
 

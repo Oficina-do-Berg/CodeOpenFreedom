@@ -22,25 +22,24 @@ pip install -r requirements.txt
 # Windows
 INICIAR.bat
 
-# Ou direto
-python select_language.py
+# Ou direto com Python
+python main.py
 ```
 
 ## Controles
 
 - **W/S** ou **↑/↓** = Navegar
 - **ENTER** = Selecionar
-- **ESC/Q** = Sair
+- **ESC** = Sair
 
-## Modo Automático
+## Como Usar
 
-1. Selecione "MODO AUTOMATICO"
-2. CodeOpen vai:
-   - Conectar WARP
-   - Iniciar OpenCode
-   - Monitorar limites
-   - Rotacionar IP automaticamente
-   - Reiniciar quando necessário
+1. Selecione **[ INICIAR OPENCODE ]**
+2. O CodeOpen vai:
+   - Conectar o WARP no modo proxy local
+   - Iniciar o OpenCode roteado pelo proxy
+   - Monitorar limites em tempo real
+   - Rotacionar o IP automaticamente quando atingir o limite
 
 ## Troubleshooting
 
@@ -55,7 +54,7 @@ warp-cli connect
 
 **Falta alguma lib?**
 ```bash
-pip install blessed windows-curses psutil requests watchdog
+pip install -r requirements.txt
 ```
 
 ---

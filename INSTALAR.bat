@@ -38,7 +38,7 @@ if errorlevel 1 (
 
 echo [3/3] Verificando instalacao...
 echo.
-python -c "import blessed, psutil, requests, watchdog; print('OK - Todas as bibliotecas instaladas')"
+python -c "import psutil, requests; print('OK - Todas as dependencias estao prontas')"
 echo.
 
 if errorlevel 1 (
