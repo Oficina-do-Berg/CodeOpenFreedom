@@ -49,27 +49,39 @@ class OpenCodeManager:
         return None
     
     def find_running_pid(self) -> Optional[int]:
-        """Tenta localizar o PID do OpenCode em execução pelo sistema"""
+        """Tenta localizar o PID real do OpenCode em execução"""
         if self.pid:
             try:
                 proc = psutil.Process(self.pid)
                 if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
                     return self.pid
-            except psutil.NoSuchProcess:
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 self.pid = None
+                self.process = None
         
-        # Buscar por processos com nome ou cmdline 'opencode'
+        # Buscar apenas por instâncias reais do executável do OpenCode
+        # NUNCA considerar shells (cmd, powershell, python) cuja pasta de trabalho contenha 'opencode'
+        excluded_names = {
+            'python.exe', 'pythonw.exe', 'cmd.exe', 'powershell.exe',
+            'pwsh.exe', 'conhost.exe', 'windowsterminal.exe', 'code.exe'
+        }
         try:
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     name = (proc.info['name'] or '').lower()
-                    cmdline = ' '.join(proc.info['cmdline'] or []).lower()
-                    if 'opencode' in name or 'opencode' in cmdline:
-                        # Ignorar nosso próprio processo cli/main/test
-                        if 'python' in name and any(x in cmdline for x in ['cli.py', 'main.py', 'test_']):
-                            continue
+                    if name in excluded_names:
+                        continue
+                    
+                    if name in ('opencode.exe', 'opencode'):
                         self.pid = proc.info['pid']
                         return self.pid
+                    
+                    # OpenCode rodando através do Node.js
+                    if 'node' in name:
+                        cmdline = ' '.join(proc.info['cmdline'] or []).lower()
+                        if any(marker in cmdline for marker in ['opencode.js', 'bin/opencode', 'bin\\opencode', '@opencode']):
+                            self.pid = proc.info['pid']
+                            return self.pid
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
         except Exception:
