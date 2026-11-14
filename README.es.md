@@ -44,7 +44,7 @@
 
 **CodeOpenFreedom** es una capa automatizada de resiliencia y gestión de conectividad diseñada para desarrolladores de software que utilizan la interfaz de línea de comandos de **OpenCode** en sistemas Windows.
 
-Operando de manera transparente entre el terminal y los puntos de conexión externos (APIs), la herramienta establece un túnel proxy local mediante **Cloudflare WARP (puerto local 40000)**, monitoriza flujos de telemetría en tiempo real y mitiga interrupciones provocadas por el agotamiento temporal de límites de solicitudes (HTTP 429), garantizando la continuidad ininterrumpida de sus flujos de trabajo de ingeniería.
+Operando de manera transparente entre el terminal y los puntos de conexión externos (APIs), la herramienta establece un túnel proxy local mediante **Cloudflare WARP (puerto local 40000)** y observa el log de OpenCode en busca de errores reales de límite de uso. Al confirmar el límite, rota la ruta de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación anterior y reabre el TUI en la ruta nueva.
 
 ---
 
@@ -53,8 +53,8 @@ Operando de manera transparente entre el terminal y los puntos de conexión exte
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h4>Rotación Dinámica de Conexión</h4>
-      <p>Supervisión continua de códigos de error de respuesta (incluidos <code>HTTP 429</code>, <code>rate limit exceeded</code> o <code>too many requests</code>). Al detectar saturación, el subsistema orquesta una renovación de registro y establece una nueva ruta en aproximadamente 15 segundos sin cerrar el terminal activo.</p>
+      <h4>Rotación por Límite de Uso (vía log)</h4>
+      <p>Lee solo líneas nuevas con <code>level=ERROR</code>, espera cuatro segundos para que la sesión se recupere sola, detiene el TUI, renueva el registro de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación con <code>opencode run --auto -c "continue"</code> y reabre el TUI con <code>--continue</code>. El rate limit puro (HTTP 429) se detecta, pero no rota automáticamente por defecto.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Aislamiento y Respaldo de Sesiones</h4>
@@ -81,8 +81,8 @@ La siguiente tabla resume las diferencias operativas entre la ejecución estánd
 
 | Escenario Operativo | Flujo Estándar (Sin CodeOpenFreedom) | Con CodeOpenFreedom |
 | :--- | :--- | :--- |
-| **Agotamiento de Tasa (HTTP 429)** | Flujo detenido; requiere espera indeterminada | Rotación automática de ruta en ~15 segundos |
-| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Reinicio controlado con nueva ruta y datos protegidos |
+| **Agotamiento de Tasa (HTTP 429)** | Flujo detenido; requiere espera indeterminada | Detectado en el log; rotación manual disponible (~15 s) |
+| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Rotación → probe → reanudación → reapertura automáticas, con límite de 5 por 30 min |
 | **Integridad de Datos** | Riesgo de pérdida de historial en limpiezas manuales | Respaldo automático estructurado con marca temporal |
 | **Configuración de Proxy** | Ejecución manual de comandos en la consola | Enrutamiento autónomo a través del puerto local 40000 |
 | **Estabilidad Visual** | Terminal susceptible a parpadeos y congelamiento | TUI asíncrona, suave y estable en Windows Terminal |

@@ -107,92 +107,84 @@ Você verá a tela principal:
 
 ## PASSO 6: USAR AS FUNCIONALIDADES
 
-### 🔴 Opção 1: MODO AUTOMATICO (Recomendado)
+### 🔴 Opção 1: INICIAR / PARAR OPENCODE (modo automático)
 
-**O que faz:**
-- Monitora os logs do OpenCode em tempo real
-- Detecta automaticamente quando você atinge o limite
-- Para o OpenCode
-- Rotaciona seu IP via WARP
-- Reinicia o OpenCode
-- Repete o ciclo infinitamente
+**O que faz ao iniciar:**
+- Conecta/reutiliza o WARP na porta proxy 40000
+- Abre o OpenCode com `--standalone` (e `--continue` quando existe conversa)
+- Começa a monitorar **somente linhas novas** do log do OpenCode
+
+**Quando um limite real aparece no log:**
+1. Confirma que é `level=ERROR` e espera 4 segundos para ver se a sessão se recupera sozinha
+2. Para o TUI (e o serviço de background, se existir)
+3. Rotaciona o WARP e confere que o IP realmente mudou
+4. Faz uma chamada real de teste (probe) com `opencode run --standalone`
+5. Retoma a conversa com `opencode run --auto -c "continue"`
+6. Reabre o TUI com `--continue` e volta a monitorar
+
+**Anti-loop:** no máximo 5 desbloqueios a cada 30 minutos. Ao passar disso, o
+automático para e avisa no log, em vez de girar IP sem parar.
+
+**Rate limit puro (HTTP 429)** não rotaciona sozinho, porque costuma ser
+temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 
 **Como usar:**
-1. Navegue até `[ MODO AUTOMATICO ]`
-2. Pressione ENTER
-3. O sistema fará tudo automaticamente!
+1. Confirme que o aplicativo do Cloudflare WARP está ligado
+2. Selecione `[ INICIAR OPENCODE ]` e pressione ENTER
+3. Trabalhe normalmente; o desbloqueio acontece sozinho ao atingir o limite
 
-**Quando usar:** Quando você vai trabalhar por horas e quer que o IP rotacione sozinho
+**Quando usar:** quando você vai trabalhar por horas e quer que o IP rotacione sozinho
 
 ---
 
-### 🔴 Opção 2: INICIAR OpenCode
-
-**O que faz:**
-- Inicia o OpenCode manualmente (equivalente a digitar `opencode` no terminal)
-
-**Como usar:**
-1. Navegue até `[ INICIAR ]`
-2. Pressione ENTER
-3. Aguarde a mensagem de confirmação
-
-**Quando usar:** Para iniciar o OpenCode uma única vez manualmente
-
----
-
-### 🔴 Opção 3: PARAR OpenCode
-
-**O que faz:**
-- Para todos os processos do OpenCode rodando
-
-**Como usar:**
-1. Navegue até `[ PARAR ]`
-2. Pressione ENTER
-
-**Quando usar:** Quando quiser encerrar o OpenCode
-
----
-
-### 🔴 Opção 4: ROTACIONAR IP
+### 🔴 Opção 2: ROTACIONAR IP
 
 **O que faz:**
 - Força uma rotação de IP imediata via WARP
-- Processo: desconecta → deleta registro → cria novo → reconecta
+- Processo: desconecta → deleta registro → cria novo → reconecta → valida o IP
 - Demora cerca de 16 segundos
+- Se o OpenCode estiver aberto, ele é reaberto na mesma conversa com a rota nova
 
 **Como usar:**
 1. Navegue até `[ ROTACIONAR IP ]`
 2. Pressione ENTER
 3. Aguarde ~16 segundos
 
-**Quando usar:** Quando você atingiu o limite e quer rotacionar manualmente
+**Quando usar:** quando você atingiu o limite e quer rotacionar manualmente
 
 ---
 
-### 🔴 Opção 5: CONEXAO (Menu de gerenciamento)
+### 🔴 Opção 3: RESET PROFUNDO
 
-**O que tem dentro:**
-```
-  > [ CONECTAR WARP ]    → Conecta ao WARP
-    [ DESCONECTAR ]      → Desconecta do WARP
-    [ ROTACIONAR ]       → Rotaciona o IP
-    [ VOLTAR ]           → Volta ao menu principal
-```
+**O que faz:**
+- Para o TUI e o serviço de background
+- Arquiva os chats em `Desktop\opencode_chats_archiviate`
+- Remove `~/.local/share/opencode/auth.json` (com backup verificado antes)
+- Limpa o cache de `~/.cache/opencode`
+- Rotaciona o WARP e reabre o OpenCode para um novo login
 
 **Como usar:**
-1. Navegue até `[ CONEXAO ]`
-2. Pressione ENTER
-3. Escolha a sub-opção desejada
-4. Pressione ESC para voltar
+1. Navegue até `[ RESET PROFUNDO ]`
+2. Pressione ENTER e confirme com `S` ou `Y`
+
+**Quando usar:** quando a cota da conta esgotou e você quer começar do zero.
+
+> O `service.json` do OpenCode v2 (senha local do serviço) **nunca** é apagado.
 
 ---
 
-### 🔴 Opção 6: SAIR
+### 🔴 Opção 4: AJUDA
+
+Mostra o resumo das funções, teclas e requisitos.
+
+---
+
+### 🔴 Opção 5: SAIR
 
 **O que faz:**
 - Encerra o programa com segurança
-- Para monitoramento se estiver ativo
-- Para OpenCode se estiver rodando
+- Para o monitoramento se estiver ativo
+- Para o TUI do OpenCode se estiver rodando
 
 ---
 
@@ -203,17 +195,16 @@ Você verá a tela principal:
 ```
 1. Abra o CodeOpen (INICIAR.bat)
 2. Selecione o idioma
-3. Vá em [ CONEXAO ] → [ CONECTAR WARP ]
-4. Volte ao menu principal (ESC)
-5. Selecione [ MODO AUTOMATICO ]
-6. Deixe rodando!
+3. Confirme que o aplicativo Cloudflare WARP está ligado
+4. Selecione [ INICIAR OPENCODE ]
+5. Deixe rodando!
 ```
 
 O programa vai:
-- ✓ Iniciar o OpenCode
-- ✓ Monitorar os logs
-- ✓ Rotacionar automaticamente quando atingir limite
-- ✓ Continuar trabalhando sem interrupção
+- ✓ Abrir o OpenCode já roteado pelo WARP
+- ✓ Monitorar somente erros novos do log
+- ✓ Rotacionar, testar a rota e retomar a conversa automaticamente
+- ✓ Reabrir o TUI na mesma conversa
 
 ---
 
@@ -222,8 +213,8 @@ O programa vai:
 ```
 1. Abra o CodeOpen (INICIAR.bat)
 2. Selecione o idioma
-3. Vá em [ CONEXAO ] → [ CONECTAR WARP ]
-4. Volte e selecione [ INICIAR ]
+3. Confirme que o aplicativo Cloudflare WARP está ligado
+4. Selecione [ INICIAR OPENCODE ]
 5. Quando atingir limite: [ ROTACIONAR IP ]
 6. Repita passo 5 quando necessário
 ```
@@ -300,20 +291,24 @@ npm install -g @opencode/cli
 **Causa:** WARP não está conectado
 
 **Solução:**
-1. Vá em [ CONEXAO ]
-2. Selecione [ CONECTAR WARP ]
+1. Abra o aplicativo Cloudflare WARP e deixe-o conectado
+2. No CodeOpen, selecione [ ROTACIONAR IP ]
 3. Aguarde 3-5 segundos
 4. Tente rotacionar novamente
 
 ---
 
-### ❌ Problema: "Modo Automático em desenvolvimento"
-**Causa:** Funcionalidade ainda não implementada completamente
+### ❌ Problema: o desbloqueio automático não acontece
+**Causa:** o monitor só considera linhas `level=ERROR` **novas**, com timestamp
+posterior ao início do monitoramento.
 
-**Solução:** Use o modo manual por enquanto:
-1. [ CONEXAO ] → [ CONECTAR WARP ]
-2. [ INICIAR ] para iniciar OpenCode
-3. Quando atingir limite: [ ROTACIONAR IP ]
+**Solução:**
+1. Confirme que o WARP está ligado e que o OpenCode foi aberto pelo CodeOpen
+2. Veja o log do CodeOpen em `~/.opencode-infinity-simple/logs/` (arquivo do dia)
+3. Se aparecer "Limite de rotações automáticas atingido", aguarde a janela de
+   30 minutos ou use [ ROTACIONAR IP ] manualmente
+4. Rate limit puro (HTTP 429) **não** rotaciona sozinho por padrão; use
+   [ ROTACIONAR IP ] se quiser trocar a rota
 
 ---
 
@@ -323,7 +318,7 @@ npm install -g @opencode/cli
 
 **Logs do programa:**
 ```
-C:\Users\berg\.opencode-infinity-simple\app.log
+C:\Users\berg\.opencode-infinity-simple\logs\AAAAMMDD.log
 ```
 
 **Configuração:**
@@ -423,13 +418,13 @@ cd "c:\Users\berg\Desktop\OPENCODE INFINITE TESTE\opencode-infinity-simple"
 
 ✅ **Use Windows Terminal** para melhor experiência visual
 
-✅ **Modo Automático** (quando implementado) será ideal para sessões longas
+✅ **Modo Automático** é o padrão do [ INICIAR OPENCODE ]: ideal para sessões longas
 
-✅ **Modo Manual** dá mais controle mas requer intervenção
+✅ **Modo Manual** dá mais controle: use [ ROTACIONAR IP ] quando quiser
 
 ✅ **Sempre conecte ao WARP primeiro** antes de usar outras funções
 
-✅ **Logs são salvos automaticamente** em `~/.opencode-infinity-simple/app.log`
+✅ **Logs são salvos automaticamente** em `~/.opencode-infinity-simple/logs/`
 
 ✅ **Rotação demora ~16 segundos** - é normal, não é bug
 
@@ -473,7 +468,7 @@ Total: ~16 segundos
 
 1. **Verifique os logs:**
    ```powershell
-   notepad C:\Users\berg\.opencode-infinity-simple\app.log
+   explorer "$HOME\.opencode-infinity-simple\logs"
    ```
 
 2. **Teste WARP manualmente:**
@@ -503,7 +498,7 @@ Total: ~16 segundos
 
 ## 📊 ENTENDENDO OS LOGS
 
-Os logs salvos em `app.log` mostram:
+Os logs salvos em `~/.opencode-infinity-simple/logs/` mostram:
 
 ```
 2026-11-12 10:30:15 - INFO - Conexão WARP estabelecida

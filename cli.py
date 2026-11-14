@@ -98,7 +98,7 @@ class CodeOpenCLI:
     
     def update_menu_options(self):
         t = TRANSLATIONS[self.lang]
-        is_running = self.opencode.is_running() or self.orchestrator.monitor.is_monitoring()
+        is_running = self.opencode.is_running()
         toggle_label = t['stop_opencode'] if is_running else t['start_opencode']
         
         self.menu_options = [
@@ -195,7 +195,7 @@ class CodeOpenCLI:
         last_running_state = None
         
         while True:
-            is_running = self.opencode.is_running() or self.orchestrator.monitor.is_monitoring()
+            is_running = self.opencode.is_running()
             if is_running != last_running_state:
                 self.update_menu_options()
                 last_running_state = is_running
@@ -226,13 +226,15 @@ class CodeOpenCLI:
     
     def toggle_opencode(self):
         self.clear_screen()
-        is_running = self.opencode.is_running() or self.orchestrator.monitor.is_monitoring()
+        is_running = self.opencode.is_running()
         
         if is_running:
             print(f"\n  {WHITE}Parando OpenCode e Monitoramento...{RESET}\n")
             self.orchestrator.stop_flow()
             print(f"  {RED}OK - OpenCode e Monitoramento encerrados{RESET}\n")
         else:
+            if self.orchestrator.monitor.is_monitoring():
+                self.orchestrator.monitor.stop()
             print(f"\n  {WHITE}Iniciando OpenCode com Rotação Automática (WARP)...{RESET}\n")
             success = self.orchestrator.start_full_flow()
             if success:
@@ -248,7 +250,7 @@ class CodeOpenCLI:
                 else:
                     print(f"  {RED}ERRO: Falha ao estabelecer conexão com o proxy WARP.{RESET}")
                     print(f"  {WHITE}Certifique-se de que o aplicativo Cloudflare WARP está ABERTO e LIGADO.{RESET}")
-                    print(f"  {DIM_WHITE}Verifique também os logs em ~/.opencode-infinity-simple/app.log{RESET}\n")
+                    print(f"  {DIM_WHITE}Verifique também os logs em ~/.opencode-infinity-simple/logs/{RESET}\n")
         
         print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
         msvcrt.getch()
@@ -257,6 +259,7 @@ class CodeOpenCLI:
     def rotate_ip(self):
         self.clear_screen()
         print(f"\n  {WHITE}Rotacionando IP via WARP...{RESET}\n")
+        self.monitor.stop()
         was_running = self.opencode.is_running()
         if was_running:
             print(f"  {DIM_WHITE}Pausando OpenCode temporariamente para troca de rota...{RESET}")
@@ -267,11 +270,21 @@ class CodeOpenCLI:
             print(f"\n  {RED}OK - IP rotacionado com sucesso!{RESET}")
             if was_running:
                 print(f"  {WHITE}Reiniciando OpenCode com o novo IP...{RESET}")
-                self.opencode.start(proxy_url=self.connection.proxy_url)
+                self.opencode.start(
+                    proxy_url=self.connection.proxy_url,
+                    continue_session=True
+                )
+                if self.config.get('auto_rotate', True):
+                    self.monitor.start()
         else:
             print(f"\n  {DIM_WHITE}ERRO - Falha na rotação. Verifique os logs.{RESET}")
             if was_running:
-                self.opencode.start(proxy_url=self.connection.proxy_url)
+                self.opencode.start(
+                    proxy_url=self.connection.proxy_url,
+                    continue_session=True
+                )
+                if self.config.get('auto_rotate', True):
+                    self.monitor.start()
         
         print(f"\n  {DIM_WHITE}{self.t('press_key')}...{RESET}")
         msvcrt.getch()
@@ -299,13 +312,29 @@ class CodeOpenCLI:
         
         if key in (b'S', b'Y'):
             print(f"\n  {WHITE}Executando deep reset completo...{RESET}\n")
+            self.monitor.stop()
+            if self.opencode.is_running():
+                self.opencode.stop()
+            self.opencode.stop_service()
+
             success = self.rotator.rotate(deep_reset=True)
             if success:
                 print(f"\n  {RED}SUCESSO!{RESET}")
                 print(f"  {WHITE}Chats arquivados em: Desktop\\opencode_chats_archiviate{RESET}")
                 print(f"  {WHITE}Cache limpo e novo registro WARP ativo com IP novo.{RESET}\n")
+
+                print(f"  {WHITE}Reabrindo o OpenCode...{RESET}")
+                if self.opencode.start(
+                    proxy_url=self.connection.proxy_url,
+                    continue_session=False
+                ):
+                    print(f"  {DIM_WHITE}OpenCode aberto. Faça login novamente.{RESET}\n")
+                    if self.config.get('auto_rotate', True):
+                        self.monitor.start()
+                else:
+                    print(f"  {DIM_WHITE}Abra o OpenCode manualmente pelo menu.{RESET}\n")
             else:
-                print(f"\n  {DIM_WHITE}ERRO - Verifique os logs em ~/.opencode-infinity-simple/app.log{RESET}\n")
+                print(f"\n  {DIM_WHITE}ERRO - Verifique os logs em ~/.opencode-infinity-simple/logs/{RESET}\n")
         else:
             print(f"\n  {DIM_WHITE}Operacao cancelada{RESET}\n")
         

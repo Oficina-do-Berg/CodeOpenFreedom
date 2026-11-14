@@ -2,6 +2,7 @@
 Gerenciamento de Conexões (WARP/Tor/Proxy)
 """
 
+import ipaddress
 import subprocess
 import requests
 import time
@@ -194,65 +195,90 @@ class ConnectionManager:
         # 5. Configurar proxy URL e verificar trace real
         self.proxy_url = f"http://127.0.0.1:{port}"
         self.current_method = "WARP"
-        
-        new_ip = self.get_current_ip(use_proxy=True)
-        if new_ip:
-            self.current_ip = new_ip
-            return True
-        
+
+        # o túnel pode levar alguns segundos até passar tráfego pelo proxy
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            new_ip = self.get_current_ip(use_proxy=True)
+            if new_ip:
+                self.current_ip = new_ip
+                return True
+            time.sleep(1)
+
         logger.error("  ❌ WARP conectou mas requisições no proxy não validaram com sucesso")
         return False
     
-    def rotate_warp_ip(self, max_attempts: int = 3) -> Tuple[bool, str]:
+    @staticmethod
+    def _ip_key(ip: Optional[str]) -> str:
+        """Normaliza IPv4 e IPv6. IPv6 é comparado por /64, como no main."""
+        if not ip:
+            return ""
+
+        raw = str(ip).split('%')[0].strip()
+        try:
+            addr = ipaddress.ip_address(raw)
+        except ValueError:
+            return raw.lower()
+
+        if addr.version == 6:
+            return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+        return str(addr)
+
+    def rotate_warp_ip(self, max_attempts: int = 1) -> Tuple[bool, str]:
         """
         Rotaciona IP do WARP com validação real de mudança de endereço.
-        Garante que só retorna True se o novo IP for comprovadamente diferente do anterior.
+        Garante que só retorna True se o novo IP for comprovadamente diferente.
         """
         logger.info("🔄 Rotacionando IP WARP...")
+
         old_ip = self.current_ip
-        
-        for attempt in range(1, max_attempts + 1):
+        if not old_ip and self.proxy_url:
+            old_ip = self.get_current_ip(use_proxy=True)
+
+        attempts = max(1, int(max_attempts))
+
+        for attempt in range(1, attempts + 1):
             try:
-                logger.info(f"  Tentativa {attempt}/{max_attempts} de renovação de rota...")
-                
-                # Passo 1: Desconectar túnel ativo
+                logger.info(f"  Tentativa {attempt}/{attempts} de renovação de rota...")
+
+                # Passo 1: desconectar túnel ativo
                 self.warp_call(['disconnect'])
                 time.sleep(1)
-                
-                # Passo 2: Deletar registro de sessão anterior
+
+                # Passo 2: deletar registro de sessão anterior
                 self.warp_call(['registration', 'delete'])
                 time.sleep(1)
-                
-                # Passo 3: Gerar novo registro
+
+                # Passo 3: gerar novo registro
                 reg_res = self.warp_call(['registration', 'new'], timeout=15)
                 if reg_res.returncode != 0:
                     logger.error(f"  ❌ warp-cli registration new falhou: {reg_res.stderr.strip()}")
                     time.sleep(2)
                     continue
-                
-                # Passo 4: Subir proxy e verificar IP
+
+                # Passo 4: subir proxy e verificar IP
                 if self.warp_up():
                     new_ip = self.current_ip
-                    if old_ip and new_ip == old_ip:
-                        if attempt < max_attempts:
-                            logger.warning(f"  ⚠️ IP obtido é idêntico ao anterior ({new_ip}). Solicitando nova rota...")
+                    if old_ip and self._ip_key(new_ip) == self._ip_key(old_ip):
+                        if attempt < attempts:
+                            logger.warning(f"  ⚠️ IP idêntico ao anterior ({new_ip}); tentando de novo...")
                             time.sleep(2)
                             continue
-                        else:
-                            logger.warning(f"⚠️ Registro renovado mas o Cloudflare manteve o mesmo IP ({new_ip})")
-                            return False, f"IP não mudou após {max_attempts} tentativas (mantido: {new_ip})"
-                    else:
-                        logger.info(f"✅ IP rotacionado com sucesso: {old_ip or 'Nenhum'} → {new_ip}")
-                        return True, f"IP rotacionado para {new_ip}"
-                else:
-                    logger.warning(f"  ⚠️ Falha ao reestabelecer proxy na tentativa {attempt}")
-                    time.sleep(2)
-                    
+
+                        logger.warning(f"⚠️ Registro renovado mas o Cloudflare manteve o mesmo IP ({new_ip})")
+                        return False, f"IP não mudou após {attempts} tentativas (mantido: {new_ip})"
+
+                    logger.info(f"✅ IP rotacionado com sucesso: {old_ip or 'Nenhum'} → {new_ip}")
+                    return True, f"IP rotacionado para {new_ip}"
+
+                logger.warning(f"  ⚠️ Falha ao reestabelecer proxy na tentativa {attempt}")
+                time.sleep(2)
+
             except Exception as e:
                 logger.error(f"❌ Erro na rotação: {e}")
                 time.sleep(2)
-                
-        return False, f"Falha ao obter novo IP após {max_attempts} tentativas"
+
+        return False, f"Falha ao obter novo IP após {attempts} tentativas"
     
     def connect_direct(self) -> Tuple[bool, str]:
         """Conexão direta (sem proxy)"""

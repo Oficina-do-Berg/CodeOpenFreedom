@@ -44,7 +44,7 @@
 
 O **CodeOpenFreedom** é uma camada de resiliência e gerenciamento de conectividade projetada para desenvolvedores que utilizam a interface de linha de comando do **OpenCode** em sistemas Windows.
 
-Atuando de maneira transparente entre o terminal e as APIs externas, a ferramenta estabelece um túnel proxy local via **Cloudflare WARP (porta local 40000)**, monitora streams de telemetria em tempo de execução e mitiga interrupções provocadas por exaustão temporária de limites de requisição (HTTP 429), garantindo continuidade operacional ao fluxo de trabalho de engenharia de software.
+Atuando de maneira transparente entre o terminal e as APIs externas, a ferramenta estabelece um túnel proxy local via **Cloudflare WARP (porta local 40000)** e observa o log do OpenCode em busca de erros reais de limite de uso. Ao confirmar o limite, ela rotaciona a rota do WARP, valida a nova saída com uma chamada real de modelo, retoma a conversa anterior e reabre o TUI na rota nova.
 
 ---
 
@@ -53,8 +53,8 @@ Atuando de maneira transparente entre o terminal e as APIs externas, a ferrament
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h4>Rotação Dinâmica de Conexão</h4>
-      <p>Monitoramento contínuo de erros de resposta (como <code>HTTP 429</code>, <code>rate limit exceeded</code> ou <code>too many requests</code>). Ao detectar saturação, o subsistema orquestra a renovação de registro da sessão em aproximadamente 15 segundos sem encerrar o processo do terminal.</p>
+      <h4>Rotação por Limite de Uso (via log)</h4>
+      <p>Lê somente linhas novas com <code>level=ERROR</code>, espera quatro segundos para a sessão se recuperar sozinha, para o TUI, renova o registro do WARP, valida a nova saída com uma chamada real de modelo, retoma a conversa com <code>opencode run --auto -c "continue"</code> e reabre o TUI com <code>--continue</code>. Rate limit puro (HTTP 429) é sinalizado, mas não rotaciona sozinho por padrão.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Isolamento e Backup de Sessões</h4>
@@ -81,8 +81,8 @@ A tabela abaixo sumariza as diferenças operacionais entre o fluxo padrão de ex
 
 | Cenário Operacional | Fluxo Padrão (Sem CodeOpenFreedom) | Com CodeOpenFreedom |
 | :--- | :--- | :--- |
-| **Exaustão de Taxa (HTTP 429)** | Processo bloqueado; requer espera indeterminada | Rotação automática de rota em ~15 segundos |
-| **Saturação de Cota** | Interrupção manual do fluxo de desenvolvimento | Reset controlado com nova rota e histórico protegido |
+| **Exaustão de Taxa (HTTP 429)** | Processo bloqueado; requer espera indeterminada | Detectado no log; rotação manual disponível (~15 s) |
+| **Saturação de Cota** | Interrupção manual do fluxo de desenvolvimento | Rotação → probe → retomada → reabertura automáticas, com trava de 5 por 30 min |
 | **Integridade de Dados** | Risco de perda de histórico em limpezas manuais | Backup estruturado automático com marcação temporal |
 | **Configuração de Proxy** | Comandos manuais frequentes no console | Roteamento automático através da porta local 40000 |
 | **Estabilidade Visual** | Terminais suscetíveis a flicker e concorrência | TUI assíncrona, suave e estável no Windows Terminal |

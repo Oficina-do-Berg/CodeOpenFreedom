@@ -33,8 +33,16 @@ def setup_logger(name: str = "opencode-infinity") -> logging.Logger:
     )
     file_handler.setFormatter(file_formatter)
     
-    # Handler para console
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Handler para console. Em Windows o stdout pode ser cp1252: nunca deixe
+    # um emoji derrubar o processo por UnicodeEncodeError.
+    stream = sys.stdout
+    try:
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+    console_handler = logging.StreamHandler(stream)
     console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter('%(levelname)s: %(message)s')
     console_handler.setFormatter(console_formatter)

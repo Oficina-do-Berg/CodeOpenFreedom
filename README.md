@@ -44,7 +44,7 @@
 
 **CodeOpenFreedom** is an automated resilience and connectivity management layer engineered for software developers utilizing the **OpenCode CLI** on Windows systems.
 
-Operating transparently between the local console and external API endpoints, the application provisions a dedicated local proxy tunnel via **Cloudflare WARP (local port 40000)**, monitors runtime telemetry streams in real time, and automatically mitigates disruptions caused by temporary request rate limits (HTTP 429), ensuring seamless continuity in engineering workflows.
+Operating transparently between the local console and external API endpoints, the application provisions a dedicated local proxy tunnel via **Cloudflare WARP (local port 40000)** and watches the OpenCode log for real usage-limit errors. When a limit is confirmed, it rotates the WARP route, validates it with a real model call, resumes the previous conversation, and reopens the TUI on the new route.
 
 ---
 
@@ -53,8 +53,8 @@ Operating transparently between the local console and external API endpoints, th
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h4>Dynamic Connection Failover</h4>
-      <p>Continuous monitoring of upstream error codes (including <code>HTTP 429</code>, <code>rate limit exceeded</code>, or <code>too many requests</code>). Upon detecting saturation, the subsystem orchestrates a registration renewal and establishes a new network path in approximately 15 seconds without terminating your active terminal session.</p>
+      <h4>Log-Driven Usage-Limit Failover</h4>
+      <p>Watches only new <code>level=ERROR</code> log lines, waits four seconds to let a recovering session settle, then stops the TUI, renews the WARP registration, validates the new egress with a real model call, resumes the conversation with <code>opencode run --auto -c "continue"</code>, and reopens the TUI with <code>--continue</code>. Pure HTTP 429 responses are surfaced but not rotated automatically by default.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Session Isolation & Backup</h4>
@@ -81,8 +81,8 @@ The table below contrasts standard OpenCode CLI operation against the managed ar
 
 | Operational Scenario | Standard Workflow (Without CodeOpenFreedom) | With CodeOpenFreedom |
 | :--- | :--- | :--- |
-| **Rate Limit Exceeded (HTTP 429)** | Workflow halted; requires indeterminate idle wait | Automated route failover in ~15 seconds |
-| **Quota Depletion** | Manual interruption and loss of development velocity | Controlled credential reset with fresh route & safe data archive |
+| **Rate Limit Exceeded (HTTP 429)** | Workflow halted; requires indeterminate idle wait | Detected in the log; manual route failover available (~15 s) |
+| **Quota Depletion** | Manual interruption and loss of development velocity | Automatic rotate → probe → resume → reopen, with a 5-per-30-min anti-loop gate |
 | **Data Integrity** | High risk of chat history loss during manual cleanup | Automatic timestamped backup archive to Desktop |
 | **Proxy Configuration** | Manual execution of console network commands | Autonomous, transparent routing on local port 40000 |
 | **Interface Stability** | Terminal susceptible to flicker and thread locking | Smooth, flicker-free ANSI TUI on Windows Terminal |
@@ -95,10 +95,10 @@ The table below contrasts standard OpenCode CLI operation against the managed ar
 flowchart LR
     A["OpenCode CLI"] -->|"Local Proxy :40000"| B["Cloudflare WARP Engine"]
     B -->|"Encrypted Tunnel"| C["API Endpoints"]
-    D["Telemetry Monitor"] -.->|"Stream Inspection (HTTP 429)"| A
-    D -->|"Fault Trigger"| E["Rotation Engine"]
-    E -->|"Connection Renewal"| B
-    E -->|"Transparent Resumption"| A
+    D["OpenCode Log Monitor (new ERROR lines)"] -.->|"Usage-limit detection"| A
+    D -->|"Fault Trigger"| E["Rotation + Probe Engine"]
+    E -->|"Connection Renewal & Validation"| B
+    E -->|"Session Resume + TUI Reopen"| A
 ```
 
 ---

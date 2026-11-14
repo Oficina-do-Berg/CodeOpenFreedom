@@ -48,5 +48,6 @@ INICIAR.bat
 2. O CodeOpenFreedom irá:
    * Estabelecer o proxy local via WARP na porta 40000
    * Iniciar o OpenCode CLI roteado pelo túnel seguro
-   * Monitorar streams de requisições e status HTTP 429
-   * Rotacionar o IP automaticamente quando atingir o limite
+   * Monitorar **somente linhas novas** de erro no log do OpenCode
+   * Ao detectar limite real: rotacionar o IP, testar a rota, retomar a conversa e reabrir o TUI
+   * Respeitar o limite de 5 desbloqueios automáticos por 30 minutos (anti-loop)
