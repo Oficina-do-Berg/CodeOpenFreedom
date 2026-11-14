@@ -17,24 +17,30 @@ tentativas. O log mostrava sempre a mesma sequência:
 
 ## Causa raiz (comprovada)
 
-O limite gratuito do OpenCode **não é por IP**: é por **modelo**. Cada modelo
-`*-free` do provider `opencode` tem a sua própria cota (janela de algumas
-horas, com `retryAfterMs` na resposta 429). Girar o registro do WARP troca o
-IP, mas não devolve a cota do modelo que a conversa usa.
+Havia três erros encadeados, e o principal não era a rotação em si:
 
-O `core/opencode.py` fazia o probe **sem `-m`**. Sem modelo explícito, o
-OpenCode escolhe o modelo padrão (`iceman-free` no ambiente testado), que
-ainda tinha cota. O probe então respondia `ok` e o launcher acreditava na
-rota nova. A retomada, porém, usa o modelo fixado na sessão
-(`deepseek-v4.1-flash-free`), que estava esgotado — daí o 429 imediato.
+1. **O probe testava um modelo diferente do modelo da conversa.** O
+   `core/opencode.py` chamava o probe **sem `-m`**. Sem modelo explícito, o
+   OpenCode usa o modelo padrão (`iceman-free` no ambiente testado), que
+   ainda tinha cota. O probe respondia `ok` e o launcher acreditava na rota
+   nova, mas a retomada usava o modelo fixado na sessão
+   (`deepseek-v4.1-flash-free`), que estava esgotado — 429 imediato.
+2. **O probe aceitava qualquer retorno `0`.** Um run que terminava sem a
+   resposta pedida era contado como rota boa; o main exige a resposta
+   exata `pong`.
+3. **A caçada desistia cedo (3 tentativas).** O limite gratuito é por
+   modelo **e varia por rota/IP**: o mesmo modelo esgotado em uma rota pode
+   ser aceito em outra. No teste real, o `deepseek` recusou em 6 rotas
+   seguidas e passou na 8ª. Com 3 tentativas, o launcher parava antes de
+   achar a rota boa.
 
-Ou seja: o probe testava um modelo, a retomada usava outro, e o IP não tinha
-nada a ver com o problema. Além disso, o probe aceitava qualquer retorno `0`
-como rota boa, mesmo quando o modelo não respondia à pergunta pedida.
+O `main` acerta porque faz o probe com o **mesmo modelo da conversa**, só
+aprova quando ele responde `pong` e repete a caçada até `hunt_max` (10 no
+desktop, 20 no `.bat`). Trocar de modelo é o plano B, não o plano A.
 
 ### Evidência (14/11, OpenCode 2.2.7)
 
-Testes controlados, todos com o proxy WARP novo e válido (`warp=on`):
+Testes controlados com o proxy WARP válido (`warp=on`):
 
 | Teste | Modelo | Resultado |
 |---|---|---|
@@ -43,10 +49,14 @@ Testes controlados, todos com o proxy WARP novo e válido (`warp=on`):
 | sessão nova, `-m` explícito | `opencode/glm-5.3-flash-free` | 429 `FreeUsageLimitError` |
 | sessão existente, `-s` | `deepseek-v4.1-flash-free` | 429 `FreeUsageLimitError` |
 | sessão existente, `-s` + `-m` | `opencode/iceman-free` | rc=0, conversa retomada |
+| caçada, IPs 1–6 | `deepseek-v4.1-flash-free` | 429 em todas |
+| caçada, IP 8 | `deepseek-v4.1-flash-free` | rc=0, retomada concluída |
 
-O 429 traz `"retryAfterMs"` (≈ 3h no dia do teste). O mesmo IP aceitava um
-modelo com cota e recusava outro esgotado; um IP novo recusava o modelo
-esgotado do mesmo jeito.
+As cinco primeiras linhas mostram que a cota é **por modelo** na mesma
+rota. As duas últimas mostram que ela também **muda com a rota**: o mesmo
+modelo voltou a responder em outro IP. Por isso o fluxo do main é caçar
+rota com o modelo da conversa, e só depois considerar trocar de modelo. O
+429 traz `"retryAfterMs"` (≈ 3h no dia do teste).
 
 O log do OpenCode confirma que o probe criava uma sessão nova e que a
 retomada escrevia no `ses_...` da conversa, com o modelo antigo.
@@ -142,15 +152,21 @@ para serem testados no fallback antes dos gratuitos.
   limitada, sem conversa, caçada esgotada, fallback de modelo, probe
   quebrado, anti-loop, retomada com retorno não-padrão e concorrência.
 - `python test_fluxo.py` → **9/9 grupos** (regressão do monitor, comandos,
-  probe com `pong`, evento estruturado de limite e timeout por inatividade).
+  probe com `pong`, evento estruturado de limite, texto da resposta que
+  cita "usage limit", timeout por inatividade e reabertura do TUI).
 - `python test_correcao.py`, `test_reset.py`, `test_sistema.py` → OK.
 
 Validação real com o OpenCode 2.2.7 e WARP ligado:
 
 ```text
-opencode/deepseek-v4.1-flash-free -> burned (retryAfterMs ≈ 3h)
-opencode/iceman-free              -> ok (pong)
-sessão retomada com -s ses_... -m opencode/iceman-free -> rc=0
+Alvo: ses_e248e918cffe0bXthCdB3U0uH7 | modelo: opencode/deepseek-v4.1-flash-free
+Tentativa 1..6: rotacionou, probe = burned
+Tentativa 7..8: rotação falhou (IP repetido) e continuou
+Tentativa 9: rotacionou, probe = burned
+Tentativa 10: rotacionou, probe = ok (pong)
+💬 Retomando ... -m opencode/deepseek-v4.1-flash-free -s ses_...
+✅ Conversa retomada; TUI reaberto; monitor religado
+RESULTADO: desbloqueado | rotações: 8 | trocas de modelo: 0
 ```
 
 ## Como validar na prática
@@ -168,5 +184,5 @@ sessão retomada com -s ses_... -m opencode/iceman-free -> rc=0
    - `✅ DESBLOQUEIO CONCLUÍDO`
 4. Se nenhuma rota aceitar o modelo, aparece
    `Nenhuma rota aceitou esse modelo; tentando outro modelo livre`.
-5. Se todos os modelos livres estiverem esgotados, o log informa em quantas
-   horas a próxima cota volta. Nesse caso, nem IP novo resolve.
+5. Se todos os modelos livres estiverem esgotados na rota atual e a caçada
+   não achar rota, o log informa em quantas horas a próxima cota volta.

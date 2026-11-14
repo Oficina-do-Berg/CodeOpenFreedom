@@ -120,8 +120,12 @@ Você verá a tela principal:
 3. Identifica no banco local a conversa e o **modelo** que ela usa
 4. Caça uma rota que aceite esse modelo: gira o IP do WARP até 10 vezes e faz o probe com `-m <modelo>` (o probe só aprova quando o modelo responde `pong`)
 5. Retoma a mesma conversa com `opencode run --auto -s <id> -m <modelo>`
-6. Se nenhuma rota aceitar o modelo, troca para outro modelo `*-free` na rota atual (o limite do OpenCode é por modelo, não por IP)
+6. Se nenhuma rota aceitar o modelo, troca para outro modelo `*-free` na rota atual (a cota é por modelo e também varia por rota: a caçada de IP é o plano A, a troca de modelo é o plano B)
 7. Reabre o TUI com `--continue` e volta a monitorar
+
+A retomada tem 600 s de teto e 60 s de inatividade (o mesmo `RESUME_IDLE`
+do main): um turno longo continua vivo enquanto escreve; travado sem saída,
+volta a girar.
 
 O modelo que passou no probe fica salvo em `last_good_model` no
 `~/.opencode-infinity-simple/config.json` e é testado primeiro na próxima vez.
@@ -307,9 +311,10 @@ npm install -g @opencode/cli
 
 ### ❌ Problema: o desbloqueio automático não acontece
 **Causa:** o monitor só considera linhas `level=ERROR` **novas**, com timestamp
-posterior ao início do monitoramento. Além disso, o limite gratuito do
-OpenCode é **por modelo**: se a cota do modelo da conversa acabou, girar o IP
-não devolve essa cota; o launcher precisa trocar de modelo.
+posterior ao início do monitoramento. Além disso, a cota gratuita do
+OpenCode é por modelo e muda com a rota: o launcher precisa caçar uma rota
+que aceite o **modelo da conversa** (probe com `pong`) e só troca de modelo
+se a caçada esgotar.
 
 **Solução:**
 1. Confirme que o WARP está ligado e que o OpenCode foi aberto pelo CodeOpen
