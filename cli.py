@@ -88,8 +88,8 @@ TRANSLATIONS = {
 class CodeOpenCLI:
     def __init__(self, lang='pt'):
         self.config = Config()
-        self.connection = ConnectionManager(self.config)
         self.opencode = OpenCodeManager(self.config)
+        self.connection = ConnectionManager(self.config, self.opencode)  # Passar opencode!
         self.rotator = IPRotator(self.connection, self.config, self.opencode)
         self.monitor = LogMonitor(self.config)
         self.orchestrator = Orchestrator(
@@ -307,6 +307,8 @@ class CodeOpenCLI:
         success = self.rotator.rotate()
         if success:
             print(f"\n  {RED}OK - IP rotacionado com sucesso!{RESET}")
+            if self.opencode.supports_service():
+                self.opencode.restart_service(self.connection.proxy_url)
             if was_running:
                 print(f"  {WHITE}Reiniciando OpenCode com o novo IP...{RESET}")
                 self.opencode.start(
@@ -368,6 +370,9 @@ class CodeOpenCLI:
                 print(f"\n  {RED}SUCESSO!{RESET}")
                 print(f"  {WHITE}Chats arquivados em: Desktop\\opencode_chats_archiviate{RESET}")
                 print(f"  {WHITE}Cache limpo e novo registro WARP ativo com IP novo.{RESET}\n")
+
+                if self.opencode.supports_service():
+                    self.opencode.restart_service(self.connection.proxy_url)
 
                 print(f"  {WHITE}Reabrindo o OpenCode...{RESET}")
                 if self.opencode.start(

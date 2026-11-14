@@ -14,8 +14,9 @@ logger = get_logger(__name__)
 class ConnectionManager:
     """Gerencia diferentes métodos de conexão"""
     
-    def __init__(self, config):
+    def __init__(self, config, opencode_manager=None):
         self.config = config
+        self.opencode = opencode_manager  # Para reiniciar serviço após rotação
         self.current_method = None
         self.current_ip = None
         self.proxy_url = None
@@ -158,8 +159,10 @@ class ConnectionManager:
                 logger.error(f"  ❌ Falha ao criar novo registro WARP: {reg_new.stderr.strip()}")
                 return False
         
-        # 2. Configurar modo proxy e verificar retorno
-        logger.info("  Configurando modo proxy...")
+        # 2. Configurar protocolo MASQUE e modo proxy (padrão original)
+        logger.info("  Configurando protocolo e modo proxy...")
+        self.warp_call(['tunnel', 'protocol', 'set', 'MASQUE'])
+
         mode_res = self.warp_call(['mode', 'proxy'])
         if mode_res.returncode != 0:
             logger.error(f"  ❌ Falha ao definir modo proxy: {mode_res.stderr.strip()}")
@@ -176,8 +179,8 @@ class ConnectionManager:
         if conn_res.returncode != 0 and 'Connected' not in conn_res.stdout:
             logger.warning(f"  ⚠️ Aviso na conexão inicial do WARP: {conn_res.stderr.strip()}")
         
-        # 4. Polling de status até conectar
-        wait_secs = 15
+        # 4. Polling de status até conectar (até 25s, padrão do main)
+        wait_secs = 25
         logger.info(f"  Aguardando conexão (até {wait_secs}s)...")
         connected = False
         for i in range(wait_secs):
@@ -245,12 +248,20 @@ class ConnectionManager:
                 self.warp_call(['disconnect'])
                 time.sleep(1)
 
-                # Passo 2: deletar registro de sessão anterior
+                # Passo 2: deletar registro de sessão anterior e aguardar daemon liberar (padrão do main)
                 self.warp_call(['registration', 'delete'])
-                time.sleep(1)
+                for _ in range(6):
+                    time.sleep(1)
+                    chk = self.warp_call(['registration', 'show'])
+                    if chk.returncode != 0 or 'Missing' in chk.stdout or 'No registration' in chk.stdout:
+                        break
 
-                # Passo 3: gerar novo registro
+                # Passo 3: gerar novo registro (com retry de tolerância caso o daemon esteja ocupado)
                 reg_res = self.warp_call(['registration', 'new'], timeout=15)
+                if reg_res.returncode != 0:
+                    time.sleep(2)
+                    reg_res = self.warp_call(['registration', 'new'], timeout=15)
+
                 if reg_res.returncode != 0:
                     logger.error(f"  ❌ warp-cli registration new falhou: {reg_res.stderr.strip()}")
                     time.sleep(2)
@@ -269,6 +280,17 @@ class ConnectionManager:
                         return False, f"IP não mudou após {attempts} tentativas (mantido: {new_ip})"
 
                     logger.info(f"✅ IP rotacionado com sucesso: {old_ip or 'Nenhum'} → {new_ip}")
+
+                    # 🔥 CORREÇÃO CRÍTICA: Reiniciar serviço de background do OpenCode v2
+                    # O serviço mantém sockets da rota antiga. Sem restart, OpenCode
+                    # continua usando o IP velho mesmo com proxy novo nas variáveis.
+                    if self.opencode and self.opencode.supports_service():
+                        logger.info("♻️  Reiniciando serviço de background do OpenCode...")
+                        if self.opencode.restart_service(proxy_url=self.proxy_url):
+                            logger.info("✅ Serviço reiniciado com novo proxy!")
+                        else:
+                            logger.warning("⚠️  Aviso: Serviço pode estar usando conexões antigas")
+
                     return True, f"IP rotacionado para {new_ip}"
 
                 logger.warning(f"  ⚠️ Falha ao reestabelecer proxy na tentativa {attempt}")

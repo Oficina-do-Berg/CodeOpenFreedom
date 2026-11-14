@@ -127,6 +127,10 @@ class Orchestrator:
             proxy_url = self.connection.proxy_url
             logger.info(f"✅ Nova rota: {self.connection.current_ip}")
 
+            # Reiniciar o serviço de background sob o novo proxy (padrão do main)
+            if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
+                self.opencode.restart_service(proxy_url)
+
             # 3. provar a rota nova antes de retomar
             if self.config.get('probe_enabled', True):
                 status, detail = self.opencode.probe(proxy_url, cwd=workdir)
@@ -248,6 +252,10 @@ class Orchestrator:
 
         logger.info(f"✅ {msg}")
         logger.info(f"   IP: {self.connection.current_ip}")
+
+        # Reiniciar o serviço de background sob o novo proxy (padrão do main)
+        if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
+            self.opencode.restart_service(self.connection.proxy_url)
 
         logger.info("2️⃣ Iniciando OpenCode...")
         success = self.opencode.start(

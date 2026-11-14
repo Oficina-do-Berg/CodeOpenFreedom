@@ -121,15 +121,19 @@ class OpenCodeManager:
         return None
 
     def _build_env(self, proxy_url: Optional[str]) -> dict:
-        """Ambiente do processo, com o proxy da rota atual."""
+        """Ambiente do processo, com o proxy da rota atual (padrão do main)."""
         env = os.environ.copy()
+        proxy_keys = (
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "all_proxy",
+        )
         if proxy_url:
-            for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            for key in proxy_keys:
                 env[key] = proxy_url
             env["NO_PROXY"] = "localhost,127.0.0.1,::1"
             env["no_proxy"] = "localhost,127.0.0.1,::1"
         else:
-            for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            for key in proxy_keys:
                 env.pop(key, None)
         return env
 
@@ -351,6 +355,26 @@ class OpenCodeManager:
 
         logger.info("✅ Serviço de background parado")
         return True
+
+    def restart_service(self, proxy_url: Optional[str] = None) -> bool:
+        """Reinicia o serviço de background (v2) sob o proxy atual (padrão do main).
+
+        Garante que o daemon do OpenCode receba as novas variáveis de ambiente
+        de proxy (HTTP_PROXY / ALL_PROXY) e encerre conexões TCP antigas.
+        """
+        if not self.supports_service():
+            return False
+
+        logger.info("🔄 Reiniciando serviço de background do OpenCode sob o proxy...")
+        res = self._run_cli(["service", "restart"], proxy_url=proxy_url, timeout=20)
+        if res.returncode == 0:
+            logger.info("✅ Serviço de background reiniciado com sucesso")
+            return True
+
+        logger.warning(
+            f"⚠️ Falha ou aviso ao reiniciar serviço de background: {res.stderr.strip() or res.stdout.strip()}"
+        )
+        return False
 
     def supports_standalone(self) -> bool:
         """O CLI tem --standalone? (OpenCode v2)"""
