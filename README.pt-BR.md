@@ -54,7 +54,7 @@ Atuando de maneira transparente entre o terminal e as APIs externas, a ferrament
   <tr>
     <td width="50%" valign="top">
       <h4>Rotação por Limite de Uso (via log)</h4>
-      <p>Lê somente linhas novas com <code>level=ERROR</code>, espera quatro segundos para a sessão se recuperar sozinha, para o TUI, renova o registro do WARP, valida a nova saída com uma chamada real de modelo, retoma a conversa com <code>opencode run --auto -c "continue"</code> e reabre o TUI com <code>--continue</code>. Rate limit puro (HTTP 429) é sinalizado, mas não rotaciona sozinho por padrão.</p>
+      <p>Lê somente linhas novas com <code>level=ERROR</code>, espera quatro segundos para o bloco de erro terminar, para o TUI, renova o registro do WARP, valida a nova saída com uma chamada real de modelo, retoma a conversa com <code>opencode run --auto -c "continue"</code> e reabre o TUI com <code>--continue</code>. Uma linha <code>level=INFO</code> posterior nunca cancela um limite confirmado. Rate limit puro (HTTP 429) é sinalizado, mas não rotaciona sozinho por padrão.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Isolamento e Backup de Sessões</h4>

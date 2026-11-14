@@ -240,6 +240,41 @@ def test_anti_loop():
     return bool(ok)
 
 
+def test_retomada_aviso_nao_descarta_rota():
+    print("\n7. Retomada com retorno não-padrão sem limite: preserva rota boa")
+    cfg = FakeConfig()
+    conn = FakeConnection()
+    rot = FakeRotator(conn)
+    # resume retorna 'error' sem mensagem de limite (ex.: sem mensagem pendente)
+    oc = FakeOpenCode(resume_results=[("error", "no message was pending")])
+    mon = FakeMonitor()
+    orc = Orchestrator(conn, oc, rot, mon, cfg)
+
+    orc.handle_limit_detected()
+
+    ok = check("rotacionou apenas uma vez", rot.rotation_count == 1, str(rot.rotation_count))
+    ok &= check("reabriu com sucesso", oc.started == 1, str(oc.started))
+    ok &= check("resultado desbloqueado", orc.last_result == "desbloqueado", orc.last_result)
+    return bool(ok)
+
+
+def test_concorrencia_bloqueia_start():
+    print("\n8. Concorrência: start_full_flow bloqueado durante desbloqueio")
+    cfg = FakeConfig()
+    conn = FakeConnection()
+    rot = FakeRotator(conn)
+    oc = FakeOpenCode()
+    mon = FakeMonitor()
+    orc = Orchestrator(conn, oc, rot, mon, cfg)
+
+    orc.is_unlocking = True
+    bloqueado = not orc.start_full_flow()
+    orc.is_unlocking = False
+
+    ok = check("start_full_flow recusado enquanto is_unlocking=True", bloqueado)
+    return bool(ok)
+
+
 def main():
     print("=" * 70)
     print(" TESTE DO ORQUESTRADOR (COMPONENTES FALSOS)")
@@ -252,6 +287,8 @@ def main():
         test_sem_sessao,
         test_todas_falham,
         test_anti_loop,
+        test_retomada_aviso_nao_descarta_rota,
+        test_concorrencia_bloqueia_start,
     ]
 
     results = []

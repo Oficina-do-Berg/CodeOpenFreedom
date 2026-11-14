@@ -115,10 +115,10 @@ Você verá a tela principal:
 - Começa a monitorar **somente linhas novas** do log do OpenCode
 
 **Quando um limite real aparece no log:**
-1. Confirma que é `level=ERROR` e espera 4 segundos para ver se a sessão se recupera sozinha
+1. Confirma que é `level=ERROR` e espera 4 segundos para o bloco de erro terminar (uma linha INFO posterior não cancela o limite)
 2. Para o TUI (e o serviço de background, se existir)
 3. Rotaciona o WARP e confere que o IP realmente mudou
-4. Faz uma chamada real de teste (probe) com `opencode run --standalone`
+4. Faz uma chamada real de teste (probe) com `opencode run --standalone` (e `--archived`, quando o CLI suporta)
 5. Retoma a conversa com `opencode run --auto -c "continue"`
 6. Reabre o TUI com `--continue` e volta a monitorar
 

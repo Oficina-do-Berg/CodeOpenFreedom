@@ -54,7 +54,7 @@ Operating transparently between the local console and external API endpoints, th
   <tr>
     <td width="50%" valign="top">
       <h4>Log-Driven Usage-Limit Failover</h4>
-      <p>Watches only new <code>level=ERROR</code> log lines, waits four seconds to let a recovering session settle, then stops the TUI, renews the WARP registration, validates the new egress with a real model call, resumes the conversation with <code>opencode run --auto -c "continue"</code>, and reopens the TUI with <code>--continue</code>. Pure HTTP 429 responses are surfaced but not rotated automatically by default.</p>
+      <p>Watches only new <code>level=ERROR</code> log lines, waits four seconds for the error block to finish, then stops the TUI, renews the WARP registration, validates the new egress with a real model call, resumes the conversation with <code>opencode run --auto -c "continue"</code>, and reopens the TUI with <code>--continue</code>. A later <code>level=INFO</code> line never cancels a confirmed limit. Pure HTTP 429 responses are surfaced but not rotated automatically by default.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Session Isolation & Backup</h4>

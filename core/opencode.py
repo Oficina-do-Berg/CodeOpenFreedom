@@ -48,29 +48,74 @@ class OpenCodeManager:
         self._pid_create_time: Optional[float] = None
         self._supports_standalone: Optional[bool] = None
         self._supports_service: Optional[bool] = None
+        self._supports_archived: Optional[bool] = None
 
     # --------------------------------------------------------------- descoberta
+    @staticmethod
+    def _is_launcher_shim(path: str) -> bool:
+        """O atalho criado pelo launcher do main só repassa para o npm.
+
+        Ele não é o OpenCode de verdade; usá-lo adiciona um cmd.exe na
+        árvore de processos e pode iniciar o launcher errado.
+        """
+        low = str(path).lower().replace("/", "\\")
+        return "opencode-infinite\\bin" in low and low.endswith((".cmd", ".bat"))
+
+    @staticmethod
+    def _resolve_shim(path: str) -> str:
+        """Se o caminho for um .cmd/.bat do npm, devolve o .exe vizinho."""
+        p = Path(path)
+        if p.suffix.lower() in (".cmd", ".bat"):
+            exe = p.parent / "node_modules" / "@opencode" / "cli" / "bin" / "opencode.exe"
+            if exe.is_file():
+                return str(exe)
+        return str(p)
+
+    def _find_real_binary(self) -> Optional[str]:
+        """Executáveis reais do OpenCode, na ordem em que o main os prefere."""
+        appdata = Path(os.environ.get("APPDATA", ""))
+        local = Path(os.environ.get("LOCALAPPDATA", ""))
+        program_files = Path(os.environ.get("ProgramFiles", ""))
+
+        candidates = [
+            appdata / "npm" / "node_modules" / "@opencode" / "cli" / "bin" / "opencode.exe",
+            appdata / "npm" / "opencode.exe",
+            Path.home() / ".opencode" / "bin" / "opencode.exe",
+            local / "Programs" / "OpenCode" / "OpenCode.exe",
+            program_files / "OpenCode" / "OpenCode.exe",
+        ]
+
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    return str(candidate)
+            except OSError:
+                continue
+        return None
+
     def find_opencode(self) -> Optional[str]:
-        """Encontra a instalação do OpenCode."""
+        """Encontra a instalação real do OpenCode (nunca o atalho do main)."""
         if self.opencode_path:
             return self.opencode_path
 
         logger.info("🔍 Procurando OpenCode...")
 
-        candidates = [
-            shutil.which("opencode"),
-            str(Path(os.environ.get("APPDATA", "")) / "npm" / "opencode.cmd"),
-            str(Path(os.environ.get("APPDATA", "")) / "npm" / "opencode.exe"),
-            str(Path.home() / ".opencode" / "bin" / "opencode.exe"),
-            str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "OpenCode" / "OpenCode.exe"),
-            str(Path(os.environ.get("ProgramFiles", "")) / "OpenCode" / "OpenCode.exe"),
-        ]
+        real = self._find_real_binary()
+        if real:
+            self.opencode_path = real
+            logger.info(f"✅ OpenCode encontrado: {real}")
+            return real
 
-        for candidate in candidates:
-            if candidate and Path(candidate).exists():
-                self.opencode_path = candidate
-                logger.info(f"✅ OpenCode encontrado: {candidate}")
-                return candidate
+        found = shutil.which("opencode")
+        if found:
+            if self._is_launcher_shim(found):
+                logger.info(f"ℹ️ Ignorando o atalho do launcher: {found}")
+            else:
+                found = self._resolve_shim(found)
+                if Path(found).is_file():
+                    self.opencode_path = found
+                    logger.info(f"✅ OpenCode encontrado: {found}")
+                    return found
 
         logger.warning("⚠️ OpenCode não encontrado")
         return None
@@ -120,8 +165,26 @@ class OpenCodeManager:
     def _is_tui_cmdline(self, parts) -> bool:
         return self._subcommand(parts) not in _CLI_SUBCOMMANDS
 
-    def find_running_pid(self) -> Optional[int]:
-        """PID do TUI do OpenCode. Nunca retorna o `serve --service`."""
+    @staticmethod
+    def _same_dir(proc, expected: str) -> bool:
+        """True quando o processo roda na pasta que este launcher controla."""
+        try:
+            actual = proc.cwd()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError, OSError):
+            return False
+        try:
+            return os.path.normcase(os.path.abspath(actual)) == os.path.normcase(
+                os.path.abspath(expected)
+            )
+        except (TypeError, ValueError):
+            return False
+
+    def find_running_pid(self, only_dir: Optional[str] = None) -> Optional[int]:
+        """PID do TUI do OpenCode. Nunca retorna o `serve --service`.
+
+        Com only_dir, só aceita um TUI que esteja rodando naquela pasta;
+        assim o launcher não para o TUI de outro projeto/launcher.
+        """
         if self.pid:
             try:
                 proc = psutil.Process(self.pid)
@@ -154,17 +217,20 @@ class OpenCodeManager:
                     cmdline = " ".join(parts)
                     low = cmdline.lower()
 
+                    is_tui = False
                     if name in ("opencode.exe", "opencode", "opencode.cmd"):
-                        if self._is_tui_cmdline(parts):
-                            return proc.info["pid"]
-                        continue
-
-                    if "node" in name and any(
+                        is_tui = self._is_tui_cmdline(parts)
+                    elif "node" in name and any(
                         marker in low
                         for marker in ("opencode.js", "bin/opencode", "bin\\opencode", "@opencode")
                     ):
-                        if self._is_tui_cmdline(parts):
-                            return proc.info["pid"]
+                        is_tui = self._is_tui_cmdline(parts)
+
+                    if not is_tui:
+                        continue
+                    if only_dir and not self._same_dir(proc, only_dir):
+                        continue
+                    return proc.info["pid"]
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
         except Exception as e:
@@ -193,9 +259,10 @@ class OpenCodeManager:
             pass
         return None
 
-    def is_running(self) -> bool:
+    def is_running(self, only_dir: Optional[str] = None) -> bool:
         """True somente quando existe um TUI do OpenCode."""
-        return self.find_running_pid() is not None
+        target_dir = only_dir if only_dir is not None else self.working_dir
+        return self.find_running_pid(only_dir=target_dir) is not None
 
     def is_service_running(self) -> bool:
         return self.find_service_pid() is not None
@@ -227,26 +294,45 @@ class OpenCodeManager:
                 pass
         return True
 
-    def stop(self) -> bool:
-        """Para apenas o TUI que este launcher controla."""
-        running_pid = self.find_running_pid()
-        if not running_pid:
-            logger.warning("⚠️ OpenCode (TUI) não está rodando")
+    def stop(self, force_all: bool = False) -> bool:
+        """Para o TUI que este launcher controla.
+
+        O main registra os PIDs que iniciou e nunca mata todo `opencode.exe`
+        da máquina. Aqui: primeiro o PID próprio; se ele sumiu, aceita um TUI
+        rodando na mesma pasta de trabalho. Só `force_all` (reset profundo
+        explícito) enxerga qualquer TUI.
+        """
+        target = None
+        if self.pid:
+            own_pid = self.pid
+            found = self.find_running_pid()
+            if found == own_pid:
+                target = own_pid
+
+        if not target and self.working_dir:
+            target = self.find_running_pid(only_dir=self.working_dir)
+        if not target and force_all:
+            target = self.find_running_pid()
+
+        if not target:
+            logger.warning(
+                "⚠️ Nenhum TUI do OpenCode pertence a este launcher; "
+                "nada foi encerrado."
+            )
             return False
 
-        logger.info(f"⏹️ Parando OpenCode TUI (PID {running_pid})...")
-        self._kill_tree(running_pid)
+        logger.info(f"⏹️ Parando OpenCode TUI (PID {target})...")
+        self._kill_tree(target)
 
         # espera o processo sumir para o start() não recusar em seguida
         deadline = time.time() + 5
-        while time.time() < deadline:
-            if not self.find_running_pid():
-                break
+        while time.time() < deadline and psutil.pid_exists(target):
             time.sleep(0.2)
 
-        self.pid = None
-        self.process = None
-        self._pid_create_time = None
+        if target == self.pid:
+            self.pid = None
+            self.process = None
+            self._pid_create_time = None
         logger.info("✅ OpenCode TUI parado")
         return True
 
@@ -281,6 +367,14 @@ class OpenCodeManager:
             text = (result.stdout or "") + (result.stderr or "")
             self._supports_service = result.returncode == 0 and "status" in text.lower()
         return bool(self._supports_service)
+
+    def supports_archived(self) -> bool:
+        """`run --archived` existe? (evita quebrar o probe no v1)"""
+        if self._supports_archived is None:
+            result = self._run_cli(["run", "--help"], timeout=20)
+            text = (result.stdout or "") + (result.stderr or "")
+            self._supports_archived = "--archived" in text
+        return bool(self._supports_archived)
 
     def _run_cli(self, args: List[str], proxy_url: Optional[str] = None,
                  cwd: Optional[str] = None, timeout: int = 60) -> subprocess.CompletedProcess:
@@ -337,8 +431,15 @@ class OpenCodeManager:
     def start(self, folder: Optional[str] = None, proxy_url: Optional[str] = None,
               continue_session: bool = False, _allow_standalone: bool = True) -> bool:
         """Abre o TUI em um console próprio, com o proxy atual."""
-        if self.is_running():
-            logger.warning("⚠️ O TUI do OpenCode já está rodando")
+        if folder:
+            self.working_dir = os.path.abspath(folder)
+        elif not self.working_dir:
+            self.working_dir = os.getcwd()
+
+        # só recusa se já houver um TUI na MESMA pasta; o TUI de outro
+        # projeto/launcher não impede este de abrir.
+        if self.is_running(only_dir=self.working_dir):
+            logger.warning("⚠️ O TUI do OpenCode já está rodando nesta pasta")
             return False
 
         if not self.opencode_path:
@@ -346,11 +447,6 @@ class OpenCodeManager:
         if not self.opencode_path:
             logger.error("❌ OpenCode não encontrado")
             return False
-
-        if folder:
-            self.working_dir = os.path.abspath(folder)
-        elif not self.working_dir:
-            self.working_dir = os.getcwd()
 
         standalone = bool(_allow_standalone and self.supports_standalone())
         args = ["--standalone"] if standalone else []
@@ -406,8 +502,20 @@ class OpenCodeManager:
             return False
 
     # --------------------------------------------------------------- probe/resume
+    # Probe: rota que respondeu com erro passageiro (429) também é descartada;
+    # o desktop do main trata rate limit no probe como IP queimado.
+    _PROBE_LIMIT = re.compile(
+        r"(free usage limit|usage limit reached|out of usage|insufficient credits|"
+        r"payment required|not available in your country|quota exceeded|"
+        r"ip (?:is )?blocked|403.*region|region.*403|"
+        r"rate limit|rate_limit_exceeded|too many requests|"
+        r"status(?:code)?[=: ]*429\b|http 429\b)",
+        re.IGNORECASE,
+    )
+
     @staticmethod
     def _looks_limited(text: str) -> bool:
+        """Só limite de cota/região: rate limit puro é temporário (ask)."""
         if not text:
             return False
         return bool(re.search(
@@ -431,7 +539,11 @@ class OpenCodeManager:
         workdir = cwd or str(Path.home())
         timeout = int(self.config.get("probe_timeout", 120))
 
+        # --archived: a sessão do probe nem aparece na lista; mesmo se a
+        # limpeza falhar, o --continue não aponta para ela (padrão do main).
         args = ["run", "--format", "json", "--title", "ocinfinite-probe", "--auto"]
+        if self.supports_archived():
+            args.append("--archived")
         if probe_model:
             args += ["--model", probe_model]
         if self.supports_standalone():
@@ -450,12 +562,15 @@ class OpenCodeManager:
                 delete_args = ["--standalone"] + delete_args
             self._run_cli(delete_args, proxy_url=proxy_url, cwd=workdir, timeout=20)
 
-        if self._looks_limited(output):
-            return "burned", output[-500:]
+        # v2.60 do main: saída limpa é rota boa. A resposta pode citar
+        # "usage limit" e o log compartilhado pode ter erro de outro chat;
+        # só uma execução que falhou lê o texto de limite.
         if result.returncode == 0:
             return "ok", ""
         if result.returncode == 124:
             return "timeout", "o probe não respondeu a tempo"
+        if self._PROBE_LIMIT.search(output):
+            return "burned", output[-500:]
         return "broken", output[-500:]
 
     def resume(self, proxy_url: Optional[str], cwd: Optional[str] = None) -> Tuple[str, str]:
@@ -643,7 +758,7 @@ class OpenCodeManager:
 
         # o serviço v2 mantém o banco aberto; pare antes de arquivar
         if self.is_running():
-            self.stop()
+            self.stop(force_all=True)
         if self.is_service_running():
             self.stop_service()
 

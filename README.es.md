@@ -54,7 +54,7 @@ Operando de manera transparente entre el terminal y los puntos de conexión exte
   <tr>
     <td width="50%" valign="top">
       <h4>Rotación por Límite de Uso (vía log)</h4>
-      <p>Lee solo líneas nuevas con <code>level=ERROR</code>, espera cuatro segundos para que la sesión se recupere sola, detiene el TUI, renueva el registro de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación con <code>opencode run --auto -c "continue"</code> y reabre el TUI con <code>--continue</code>. El rate limit puro (HTTP 429) se detecta, pero no rota automáticamente por defecto.</p>
+      <p>Lee solo líneas nuevas con <code>level=ERROR</code>, espera cuatro segundos para que termine el bloque de error, detiene el TUI, renueva el registro de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación con <code>opencode run --auto -c "continue"</code> y reabre el TUI con <code>--continue</code>. Una línea <code>level=INFO</code> posterior nunca cancela un límite confirmado. El rate limit puro (HTTP 429) se detecta, pero no rota automáticamente por defecto.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Aislamiento y Respaldo de Sesiones</h4>

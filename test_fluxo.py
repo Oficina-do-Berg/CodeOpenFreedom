@@ -232,6 +232,7 @@ def test_comandos():
     manager.opencode_path = r"C:\fake\opencode.cmd"
     manager.working_dir = tempfile.gettempdir()
     manager.supports_standalone = lambda: True
+    manager.supports_archived = lambda: True
 
     captured = []
 
@@ -254,6 +255,7 @@ def test_comandos():
     probe_args = captured[-1]
     ok &= check("probe usa --standalone", "--standalone" in probe_args, str(probe_args))
     ok &= check("probe usa --auto", "--auto" in probe_args, str(probe_args))
+    ok &= check("probe é arquivado (fora do --continue)", "--archived" in probe_args, str(probe_args))
     ok &= check("probe tem mensagem curta", probe_args[-1] == "reply with just: ok", str(probe_args))
 
     class FakeProcess:
@@ -262,7 +264,7 @@ def test_comandos():
         def poll(self):
             return None
 
-    manager.is_running = lambda: False
+    manager.is_running = lambda *a, **k: False
     with patch("core.opencode.subprocess.Popen", return_value=FakeProcess()) as popen, \
          patch("core.opencode.time.sleep", return_value=None):
         started = manager.start(
@@ -279,6 +281,23 @@ def test_comandos():
     return bool(ok)
 
 
+def test_limite_seguido_de_info():
+    print("\n8. Regressão: limite real não é cancelado por INFO")
+    monitor = LogMonitor(FakeConfig(settle_seconds=0))
+    monitor.start_utc = "2026-01-01T00:00:00"
+
+    block = (
+        'timestamp=2026-01-02T00:00:00.000Z level=ERROR run=x '
+        'message="Failed to drain Session" '
+        'cause="AI.Error: Free usage limit reached."\n'
+        'timestamp=2026-01-02T00:00:01.000Z level=INFO run=x message="mcp connected"\n'
+        'timestamp=2026-01-02T00:00:02.000Z level=INFO run=x message="watcher started"\n'
+    )
+
+    action = monitor._decide(block, Path("x.log"))
+    return check("INFO posterior ainda rotaciona", action == "rotate", str(action))
+
+
 def main():
     print("=" * 70)
     print(" TESTES SEGUROS - CODEOPEN")
@@ -292,6 +311,7 @@ def main():
         test_ip_key,
         test_anti_loop,
         test_comandos,
+        test_limite_seguido_de_info,
     ]
 
     results = []

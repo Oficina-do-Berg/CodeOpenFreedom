@@ -38,7 +38,7 @@ class Config:
         "rotation_window_minutes": 30,
 
         # --- watcher ---
-        "settle_seconds": 4,          # espera antes de confirmar que o erro não se recuperou
+        "settle_seconds": 4,          # espera o bloco de erro terminar; nunca cancela o limite
         "rotate_on_rate_limit": False # rate limit puro é temporário; rotação só manual
     }
 

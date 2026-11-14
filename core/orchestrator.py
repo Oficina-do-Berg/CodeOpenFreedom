@@ -34,6 +34,7 @@ class Orchestrator:
         self.rotation_count = 0
         self.working_dir: Optional[str] = None
         self.last_result = ""
+        self.is_unlocking = False
 
         self._handling = threading.Lock()
         self._rotation_times = deque()
@@ -72,9 +73,11 @@ class Orchestrator:
         if not self._handling.acquire(blocking=False):
             logger.info("ℹ️ Um desbloqueio já está em andamento; gatilho ignorado.")
             return
+        self.is_unlocking = True
         try:
             self._run_unlock()
         finally:
+            self.is_unlocking = False
             self._handling.release()
 
     # --------------------------------------------------------------------- fluxo
@@ -82,6 +85,10 @@ class Orchestrator:
         logger.info("=" * 60)
         logger.info("🚨 LIMITE DETECTADO - iniciando desbloqueio")
         logger.info("=" * 60)
+
+        # o monitor já se desligou ao disparar o callback; garantir que
+        # nenhuma linha nova (probe/resume) dispare outro desbloqueio.
+        self.monitor.stop()
 
         if not self._rotation_allowed():
             logger.error(
@@ -165,10 +172,23 @@ class Orchestrator:
                     resumed = True
                     break
 
-                logger.warning(
-                    f"⚠️ A retomada falhou ({detail[:160]}); tentando outra rota..."
+                # Se for limite explícito ou erro formatado como limite, tenta outra rota
+                is_limited = (status == 'limit') or (
+                    hasattr(self.opencode, '_looks_limited') and self.opencode._looks_limited(detail)
                 )
-                continue
+                if is_limited:
+                    logger.warning(
+                        "⚠️ A conversa ainda bateu no limite; rotacionando de novo..."
+                    )
+                    continue
+
+                # Se a rota passou no probe, ela é válida. Retornos não-zero sem texto de
+                # limite (ex.: sem mensagem pendente) não justificam descartar a rota boa.
+                logger.warning(
+                    f"ℹ️ Retomada com retorno não-padrão ({detail[:160]}), mas rota validada via probe. Prosseguindo..."
+                )
+                resumed = True
+                break
 
             resumed = True
             break
@@ -207,6 +227,10 @@ class Orchestrator:
 
     # ------------------------------------------------------------------- start/stop
     def start_full_flow(self, folder: Optional[str] = None) -> bool:
+        if self.is_unlocking or self._handling.locked():
+            logger.warning("⚠️ Um desbloqueio já está em andamento. Aguarde a conclusão.")
+            return False
+
         logger.info("=" * 60)
         logger.info("🚀 INICIANDO FLUXO COMPLETO")
         logger.info("=" * 60)
@@ -257,9 +281,10 @@ class Orchestrator:
     def get_status(self) -> dict:
         return {
             'connection': self.connection.get_status(),
-            'opencode_running': self.opencode.is_running(),
+            'opencode_running': self.opencode.is_running(only_dir=self.working_dir),
             'service_running': self.opencode.is_service_running(),
             'monitoring': self.monitor.is_monitoring(),
+            'is_unlocking': self.is_unlocking,
             'rotation_count': self.rotation_count,
             'last_result': self.last_result,
         }

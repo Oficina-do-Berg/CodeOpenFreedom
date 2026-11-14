@@ -7,8 +7,9 @@ Regras (as mesmas do main):
 - noop (compactação/contexto) é ignorado antes de rotate/ask;
 - rotate = limite de cota (rotaciona);
 - ask   = rate limit (não rotaciona sozinho por padrão);
-- depois de um erro, espera "settle_seconds" e verifica se a sessão
-  voltou a ter atividade normal antes de confirmar o limite.
+- um ERROR de limite é conclusivo: linhas INFO/DEBUG depois dele (MCP,
+  watcher, reconexão) não desfazem o limite. O main classifica cada linha
+  e para no primeiro rotate, sem janela de "recuperação".
 """
 
 import re
@@ -66,7 +67,6 @@ class LogMonitor:
 
     _LEVEL_ERROR = re.compile(r'\blevel=error\b', re.IGNORECASE)
     _TIMESTAMP = re.compile(r'\btimestamp=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
-    _INFO_AFTER = re.compile(r'\blevel=(?:info|debug)\b', re.IGNORECASE)
 
     def __init__(self, config, on_limit_callback: Optional[Callable] = None,
                  log_path: Optional[str] = None):
@@ -165,6 +165,13 @@ class LogMonitor:
         """Compatibilidade: True quando a linha é rotate ou ask."""
         return self.classify_line(text) in ('rotate', 'ask')
 
+    def _first_of_kind(self, text: str, kind: str) -> str:
+        """Primeira linha do bloco com a classificação pedida."""
+        for line in text.splitlines():
+            if self.classify_line(line) == kind:
+                return " ".join(line.split())
+        return ""
+
     # ------------------------------------------------------------------- leitura
     def _prime(self, path: Path) -> None:
         self._current_file = path
@@ -182,7 +189,13 @@ class LogMonitor:
             return ""
 
     def _decide(self, text: str, path: Path) -> Optional[str]:
-        """Classifica um bloco novo e confirma se o limite é real."""
+        """Classifica um bloco novo e confirma se o limite é real.
+
+        Um ERROR de limite não é cancelado por INFO/DEBUG posterior: o
+        OpenCode continua escrevendo no log (MCP, watcher, reconexão) mesmo
+        depois de recusar a requisição por cota. O main para no primeiro
+        rotate do bloco e rotaciona.
+        """
         lines = text.splitlines()
         kinds = [self.classify_line(line) for line in lines]
 
@@ -192,27 +205,18 @@ class LogMonitor:
         if 'rotate' in kinds:
             settle = float(self.config.get('settle_seconds', 4) or 0)
             if settle > 0:
-                # dá tempo para o OpenCode se recuperar sozinho
+                # pequena espera para o bloco de erro terminar de ser escrito
                 if self._stop_event.wait(settle):
                     return None
                 after = self._read_from(path)
                 if after:
                     lines = lines + after.splitlines()
 
-            last_fatal = -1
-            for i, line in enumerate(lines):
-                if self.classify_line(line) == 'rotate':
-                    last_fatal = i
-
-            if last_fatal >= 0:
-                for line in lines[last_fatal + 1:]:
-                    if self._INFO_AFTER.search(line):
-                        logger.info(
-                            "ℹ️ Erro de limite seguido de atividade normal; "
-                            "a sessão se recuperou sozinha."
-                        )
-                        return None
+            if any(self.classify_line(line) == 'rotate' for line in lines):
                 return 'rotate'
+            if any(self.classify_line(line) == 'ask' for line in lines):
+                return 'ask'
+            return None
 
         return 'ask'
 
@@ -252,7 +256,10 @@ class LogMonitor:
                     if text:
                         action = self._decide(text, path)
                         if action == 'rotate':
+                            detail = self._first_of_kind(text, 'rotate')
                             logger.warning("🚨 Limite de uso confirmado no log.")
+                            if detail:
+                                logger.warning(f"   {detail[:300]}")
                             self._last_trigger = time.time()
                             self.monitoring = False
                             self._spawn(self.on_limit)

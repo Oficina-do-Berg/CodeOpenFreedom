@@ -34,9 +34,11 @@ if USE_ANSI:
     WHITE = '\033[97m'
     DIM_WHITE = '\033[2;37m'
     GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BOLD_YELLOW = '\033[1;93m'
     RESET = '\033[0m'
 else:
-    RED = BOLD_RED = WHITE = DIM_WHITE = GREEN = RESET = ''
+    RED = BOLD_RED = WHITE = DIM_WHITE = GREEN = YELLOW = BOLD_YELLOW = RESET = ''
 
 LOGO = """
     ██████╗ ██████╗ ██████╗ ███████╗ ██████╗ ██████╗ ███████╗███╗   ██╗
@@ -55,6 +57,7 @@ TRANSLATIONS = {
         'monitor': 'Monitor', 'rotations': 'Rotacoes',
         'disconnected': 'Desconectado', 'active': 'ATIVO',
         'stopped': 'PARADO', 'inactive': 'INATIVO',
+        'unlocking': 'DESBLOQUEANDO...',
         'start_opencode': 'INICIAR OPENCODE',
         'stop_opencode': 'PARAR OPENCODE',
         'rotate_ip': 'ROTACIONAR IP',
@@ -69,6 +72,7 @@ TRANSLATIONS = {
         'monitor': 'Monitor', 'rotations': 'Rotations',
         'disconnected': 'Disconnected', 'active': 'ACTIVE',
         'stopped': 'STOPPED', 'inactive': 'INACTIVE',
+        'unlocking': 'UNLOCKING...',
         'start_opencode': 'START OPENCODE',
         'stop_opencode': 'STOP OPENCODE',
         'rotate_ip': 'ROTATE IP',
@@ -98,8 +102,15 @@ class CodeOpenCLI:
     
     def update_menu_options(self):
         t = TRANSLATIONS[self.lang]
-        is_running = self.opencode.is_running()
-        toggle_label = t['stop_opencode'] if is_running else t['start_opencode']
+        is_unlocking = getattr(self.orchestrator, 'is_unlocking', False)
+        is_running = self.opencode.is_running(only_dir=self.orchestrator.working_dir)
+
+        if is_unlocking:
+            toggle_label = t['unlocking']
+        elif is_running:
+            toggle_label = t['stop_opencode']
+        else:
+            toggle_label = t['start_opencode']
         
         self.menu_options = [
             (toggle_label, self.toggle_opencode),
@@ -132,7 +143,10 @@ class CodeOpenCLI:
             print(f"{DIM_WHITE}{self.t('disconnected')}{RESET}")
         
         print(f"  {WHITE}{self.t('opencode')}: {RESET}", end='')
-        print(f"{RED if status['opencode_running'] else DIM_WHITE}{self.t('active') if status['opencode_running'] else self.t('stopped')}{RESET}")
+        if status.get('is_unlocking'):
+            print(f"{BOLD_YELLOW}{self.t('unlocking')} (Rotacionando IP e Retomando){RESET}")
+        else:
+            print(f"{RED if status['opencode_running'] else DIM_WHITE}{self.t('active') if status['opencode_running'] else self.t('stopped')}{RESET}")
         
         print(f"  {WHITE}{self.t('monitor')}: {RESET}", end='')
         print(f"{RED if status['monitoring'] else DIM_WHITE}{self.t('active') if status['monitoring'] else self.t('inactive')}{RESET}")
@@ -192,14 +206,24 @@ class CodeOpenCLI:
     
     def main_menu(self):
         last_option = -1
-        last_running_state = None
+        last_state = None
         
         while True:
-            is_running = self.opencode.is_running()
-            if is_running != last_running_state:
+            status = self.orchestrator.get_status()
+            current_state = (
+                status['opencode_running'],
+                status['monitoring'],
+                status.get('is_unlocking', False),
+                status['connection']['connected'],
+                status['connection'].get('ip', ''),
+                status['rotation_count']
+            )
+
+            if current_state != last_state:
                 self.update_menu_options()
-                last_running_state = is_running
-                last_option = -1
+                last_state = current_state
+                self.draw_screen()
+                last_option = self.current_option
             
             if self.current_option != last_option:
                 self.draw_screen()
@@ -222,11 +246,19 @@ class CodeOpenCLI:
                 self.exit_app()
                 return
             
-            time.sleep(0.02)
+            time.sleep(0.05)
     
     def toggle_opencode(self):
+        if getattr(self.orchestrator, 'is_unlocking', False):
+            self.clear_screen()
+            print(f"\n  {YELLOW}Aguarde: O desbloqueio automático e a rotação de IP já estão em andamento!{RESET}\n")
+            print(f"  {DIM_WHITE}O OpenCode será reaberto automaticamente na conversa atual assim que o IP for trocado.{RESET}\n")
+            time.sleep(2)
+            self.update_menu_options()
+            return
+
         self.clear_screen()
-        is_running = self.opencode.is_running()
+        is_running = self.opencode.is_running(only_dir=self.orchestrator.working_dir)
         
         if is_running:
             print(f"\n  {WHITE}Parando OpenCode e Monitoramento...{RESET}\n")
@@ -257,10 +289,17 @@ class CodeOpenCLI:
         self.update_menu_options()
     
     def rotate_ip(self):
+        if getattr(self.orchestrator, 'is_unlocking', False):
+            self.clear_screen()
+            print(f"\n  {YELLOW}Aguarde: Um desbloqueio e rotação de IP já estão em andamento!{RESET}\n")
+            time.sleep(2)
+            self.update_menu_options()
+            return
+
         self.clear_screen()
         print(f"\n  {WHITE}Rotacionando IP via WARP...{RESET}\n")
         self.monitor.stop()
-        was_running = self.opencode.is_running()
+        was_running = self.opencode.is_running(only_dir=self.orchestrator.working_dir)
         if was_running:
             print(f"  {DIM_WHITE}Pausando OpenCode temporariamente para troca de rota...{RESET}")
             self.opencode.stop()
@@ -291,6 +330,13 @@ class CodeOpenCLI:
         self.update_menu_options()
     
     def deep_reset(self):
+        if getattr(self.orchestrator, 'is_unlocking', False):
+            self.clear_screen()
+            print(f"\n  {YELLOW}Aguarde: Um desbloqueio e rotação de IP já estão em andamento!{RESET}\n")
+            time.sleep(2)
+            self.update_menu_options()
+            return
+
         self.clear_screen()
         print(f"\n  {BOLD_RED}RESET PROFUNDO{RESET}")
         print(f"  {DIM_WHITE}{'─' * 60}{RESET}\n")
