@@ -44,7 +44,7 @@
 
 **CodeOpenFreedom** es una capa automatizada de resiliencia y gestión de conectividad diseñada para desarrolladores de software que utilizan la interfaz de línea de comandos de **OpenCode** en sistemas Windows.
 
-Operando de manera transparente entre el terminal y los puntos de conexión externos (APIs), la herramienta establece un túnel proxy local mediante **Cloudflare WARP (puerto local 40000)** y observa el log de OpenCode en busca de errores reales de límite de uso. Al confirmar el límite, rota la ruta de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación anterior y reabre el TUI en la ruta nueva.
+Operando de manera transparente entre el terminal y los puntos de conexión externos (APIs), la herramienta establece un túnel proxy local mediante **Cloudflare WARP (puerto local 40000)** y observa el log de OpenCode en busca de errores reales de límite de uso. Al confirmar el límite, identifica en la base local la conversación y el modelo en uso, y busca una ruta que acepte ese modelo girando la salida de WARP como el lanzador original, validando cada ruta con una llamada real. Si ninguna ruta acepta el modelo, cambia a otro modelo gratuito; después retoma la misma conversación con `-s`/`-m` y reabre el TUI.
 
 ---
 
@@ -53,8 +53,8 @@ Operando de manera transparente entre el terminal y los puntos de conexión exte
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h4>Rotación por Límite de Uso (vía log)</h4>
-      <p>Lee solo líneas nuevas con <code>level=ERROR</code>, espera cuatro segundos para que termine el bloque de error, detiene el TUI, renueva el registro de WARP, valida la nueva salida con una llamada real al modelo, retoma la conversación con <code>opencode run --auto -c "continue"</code> y reabre el TUI con <code>--continue</code>. Una línea <code>level=INFO</code> posterior nunca cancela un límite confirmado. El rate limit puro (HTTP 429) se detecta, pero no rota automáticamente por defecto.</p>
+      <h4>Desbloqueo por Límite de Uso (vía log)</h4>
+      <p>Lee solo líneas nuevas con <code>level=ERROR</code>, espera cuatro segundos para que termine el bloque de error, detiene el TUI y descubre en la base local qué conversación y qué modelo se están usando. Luego busca una ruta que acepte ese modelo: gira la salida de WARP hasta <code>hunt_max</code> veces, hace un probe real con <code>-m &lt;modelo&gt;</code> (solo aprueba cuando el modelo responde <code>pong</code>) y retoma la misma conversación con <code>opencode run --auto -s &lt;id&gt; -m &lt;modelo&gt;</code>. Si ninguna ruta acepta el modelo, cambia a otro modelo <code>*-free</code> en la ruta actual. Una línea <code>level=INFO</code> posterior nunca cancela un límite confirmado. El rate limit puro (HTTP 429) se detecta, pero no rota automáticamente por defecto.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Aislamiento y Respaldo de Sesiones</h4>
@@ -82,7 +82,7 @@ La siguiente tabla resume las diferencias operativas entre la ejecución estánd
 | Escenario Operativo | Flujo Estándar (Sin CodeOpenFreedom) | Con CodeOpenFreedom |
 | :--- | :--- | :--- |
 | **Agotamiento de Tasa (HTTP 429)** | Flujo detenido; requiere espera indeterminada | Detectado en el log; rotación manual disponible (~15 s) |
-| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Rotación → probe → reanudación → reapertura automáticas, con límite de 5 por 30 min |
+| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Búsqueda de IP + probe con el modelo de la conversación → fallback de modelo → reanudación → reapertura automáticas, con límite de 5 por 30 min |
 | **Integridad de Datos** | Riesgo de pérdida de historial en limpiezas manuales | Respaldo automático estructurado con marca temporal |
 | **Configuración de Proxy** | Ejecución manual de comandos en la consola | Enrutamiento autónomo a través del puerto local 40000 |
 | **Estabilidad Visual** | Terminal susceptible a parpadeos y congelamiento | TUI asíncrona, suave y estable en Windows Terminal |

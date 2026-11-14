@@ -10,9 +10,11 @@ Correções principais em relação à versão antiga:
 - o auth correto é ~/.local/share/opencode/auth.json (nunca service.json).
 """
 
+import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -49,6 +51,7 @@ class OpenCodeManager:
         self._supports_standalone: Optional[bool] = None
         self._supports_service: Optional[bool] = None
         self._supports_archived: Optional[bool] = None
+        self._free_models: Optional[List[str]] = None
 
     # --------------------------------------------------------------- descoberta
     @staticmethod
@@ -270,6 +273,125 @@ class OpenCodeManager:
 
     def is_service_running(self) -> bool:
         return self.find_service_pid() is not None
+
+    # ------------------------------------------------------- modelo / sessão
+    def _db_path(self) -> Path:
+        return self.get_data_folder() / "opencode.db"
+
+    @staticmethod
+    def _model_ref(raw) -> Optional[str]:
+        """Converte o JSON da coluna model em 'provider/model'."""
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            return None
+        provider = data.get("providerID")
+        model = data.get("id")
+        if not provider or not model:
+            return None
+        return f"{provider}/{model}"
+
+    def _connect_db(self) -> Optional[sqlite3.Connection]:
+        db = self._db_path()
+        if not db.exists():
+            return None
+        try:
+            return sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
+        except sqlite3.Error as e:
+            logger.debug(f"Banco do OpenCode indisponível: {e}")
+            return None
+
+    def latest_session(self, cwd: Optional[str] = None) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Sessão mais recente da pasta: (id, 'provider/model', diretório).
+
+        O limite gratuito do OpenCode é por **modelo**, não por IP. Para
+        retomar a conversa certa (e saber qual modelo trocar) o launcher lê
+        o banco local. Qualquer falha aqui é silenciosa: o fluxo continua
+        com `-c`/modelo padrão.
+        """
+        con = self._connect_db()
+        if con is None:
+            return None, None, None
+
+        target = None
+        if cwd:
+            try:
+                target = os.path.normcase(os.path.abspath(cwd))
+            except (TypeError, ValueError):
+                target = None
+
+        try:
+            rows = con.execute(
+                "select id, model, directory, time_archived from session_v2 "
+                "where parent_id is null order by time_updated desc limit 60"
+            ).fetchall()
+        except sqlite3.Error as e:
+            logger.debug(f"Falha ao ler sessões: {e}")
+            return None, None, None
+        finally:
+            con.close()
+
+        for sid, raw_model, directory, archived in rows:
+            if archived:
+                continue
+            if target:
+                try:
+                    if os.path.normcase(os.path.abspath(directory or "")) != target:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            return sid, self._model_ref(raw_model), directory
+
+        return None, None, None
+
+    def model_last_used(self) -> dict:
+        """{model_id: último uso em ms} para ordenar os candidatos."""
+        con = self._connect_db()
+        if con is None:
+            return {}
+        usage = {}
+        try:
+            for raw_model, last in con.execute(
+                "select model, max(time_updated) from session_v2 group by model"
+            ):
+                ref = self._model_ref(raw_model)
+                if ref:
+                    usage[ref] = int(last or 0)
+        except sqlite3.Error:
+            pass
+        finally:
+            con.close()
+        return usage
+
+    def list_free_models(self, timeout: int = 90) -> List[str]:
+        """Modelos gratuitos do provider opencode, ex.: opencode/iceman-free."""
+        if self._free_models is not None:
+            return self._free_models
+
+        args = ["models"]
+        if self.supports_standalone():
+            # não sobe o serviço compartilhado durante um desbloqueio
+            args.append("--standalone")
+        result = self._run_cli(args, timeout=timeout)
+        models = []
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if re.fullmatch(r"opencode/[A-Za-z0-9._-]+", line) and line.endswith("-free"):
+                models.append(line)
+
+        if models:
+            self._free_models = models
+        return models
+
+    @staticmethod
+    def retry_after_ms(text: str) -> int:
+        """Quanto falta para a cota livre voltar (retryAfterMs da resposta 429)."""
+        if not text:
+            return 0
+        match = re.search(r'"retryAfterMs"\s*:\s*(\d+)', text)
+        return int(match.group(1)) if match else 0
 
     # ------------------------------------------------------------------ execução
     def _kill_tree(self, pid: int) -> bool:
@@ -537,6 +659,10 @@ class OpenCodeManager:
         re.IGNORECASE,
     )
 
+    # O desktop do main só aceita a resposta que pediu ("pong"): um run que
+    # termina com código 0 sem responder não prova nada sobre a rota.
+    _PROBE_ANSWER = re.compile(r"\bpong\b", re.IGNORECASE)
+
     @staticmethod
     def _looks_limited(text: str) -> bool:
         """Só limite de cota/região: rate limit puro é temporário (ask)."""
@@ -572,7 +698,7 @@ class OpenCodeManager:
             args += ["--model", probe_model]
         if self.supports_standalone():
             args.append("--standalone")
-        args.append("reply with just: ok")
+        args.append("Reply with exactly the word: pong")
 
         logger.info("🧪 Testando a rota nova com uma chamada de modelo...")
         result = self._run_cli(args, proxy_url=proxy_url, cwd=workdir, timeout=timeout)
@@ -586,19 +712,25 @@ class OpenCodeManager:
                 delete_args = ["--standalone"] + delete_args
             self._run_cli(delete_args, proxy_url=proxy_url, cwd=workdir, timeout=20)
 
-        # v2.60 do main: saída limpa é rota boa. A resposta pode citar
-        # "usage limit" e o log compartilhado pode ter erro de outro chat;
-        # só uma execução que falhou lê o texto de limite.
+        # Padrão do desktop do main: sucesso é a resposta pedida. Um run
+        # limpo sem "pong" é um probe quebrado, não uma rota aprovada.
         if result.returncode == 0:
-            return "ok", ""
+            if self._PROBE_ANSWER.search(output):
+                return "ok", ""
+            return "broken", "o probe terminou sem a resposta esperada (pong)"
         if result.returncode == 124:
             return "timeout", "o probe não respondeu a tempo"
         if self._PROBE_LIMIT.search(output):
             return "burned", output[-500:]
         return "broken", output[-500:]
 
-    def resume(self, proxy_url: Optional[str], cwd: Optional[str] = None) -> Tuple[str, str]:
-        """Continua a última conversa na rota nova.
+    def resume(self, proxy_url: Optional[str], cwd: Optional[str] = None,
+               model: Optional[str] = None, session_id: Optional[str] = None) -> Tuple[str, str]:
+        """Continua a conversa, opcionalmente trocando o modelo.
+
+        Trocar o modelo é o que realmente desbloqueia o limite gratuito do
+        OpenCode: a cota é por modelo, não por IP. O `-m` explícito muda o
+        modelo fixado na sessão, então a conversa continua com outro modelo.
 
         Retorna: ('ok'|'limit'|'no_session'|'auth'|'timeout'|'error', detalhe)
         """
@@ -611,15 +743,32 @@ class OpenCodeManager:
             args.append("--auto")
         if self.supports_standalone():
             args.append("--standalone")
-        args += ["-c", message]
+        if model:
+            args += ["-m", model]
+        if session_id:
+            args += ["-s", session_id]
+        else:
+            args.append("-c")
+        args.append(message)
 
         timeout = int(self.config.get("resume_timeout", 180))
         workdir = cwd or self.working_dir or os.getcwd()
 
-        logger.info(f"💬 Retomando a conversa: run -c \"{message}\"")
+        target = session_id or "última conversa"
+        logger.info(
+            f"💬 Retomando {target}"
+            + (f" com o modelo {model}" if model else "")
+            + f": run {' '.join(args[1:-1])} \"{message}\""
+        )
         result = self._run_cli(args, proxy_url=proxy_url, cwd=workdir, timeout=timeout)
         output = (result.stdout or "") + "\n" + (result.stderr or "")
+        error_event = bool(re.search(r'"type"\s*:\s*"error"', output))
 
+        # Um retorno 0 é sucesso. Só um erro explícito (ou um retorno
+        # diferente de zero) pode classificar a retomada como limite: a
+        # resposta do modelo pode citar "usage limit" sem ter falhado.
+        if result.returncode == 0 and not error_event:
+            return "ok", ""
         if self._looks_limited(output):
             return "limit", output[-500:]
         if re.search(r"no session|session not found|no such session|nothing to continue", output, re.I):

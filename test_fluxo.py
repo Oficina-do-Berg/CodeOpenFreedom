@@ -251,12 +251,35 @@ def test_comandos():
     )
     ok &= check("resume manda a mensagem", resume_args[-1] == "continue", str(resume_args))
 
-    manager.probe("http://127.0.0.1:40000", cwd=tempfile.gettempdir())
+    manager.probe("http://127.0.0.1:40000", cwd=tempfile.gettempdir(),
+                 model="opencode/model-a")
     probe_args = captured[-1]
     ok &= check("probe usa --standalone", "--standalone" in probe_args, str(probe_args))
     ok &= check("probe usa --auto", "--auto" in probe_args, str(probe_args))
     ok &= check("probe é arquivado (fora do --continue)", "--archived" in probe_args, str(probe_args))
-    ok &= check("probe tem mensagem curta", probe_args[-1] == "reply with just: ok", str(probe_args))
+    ok &= check("probe testa o modelo pedido",
+                "--model" in probe_args and
+                probe_args[probe_args.index("--model") + 1] == "opencode/model-a",
+                str(probe_args))
+    ok &= check("probe pede a resposta pong (padrão do main)",
+                probe_args[-1] == "Reply with exactly the word: pong", str(probe_args))
+
+    # rc=0 sem a resposta esperada não aprova a rota (padrão do desktop do main)
+    def fake_no_answer(args, **kwargs):
+        return sp.CompletedProcess(["opencode"] + list(args), 0, '{"type":"text","text":"ok"}', "")
+
+    manager._run_cli = fake_no_answer
+    status, _ = manager.probe("http://127.0.0.1:40000", cwd=tempfile.gettempdir(),
+                              model="opencode/model-a")
+    ok &= check("probe sem pong vira broken", status == "broken", status)
+
+    def fake_answer(args, **kwargs):
+        return sp.CompletedProcess(["opencode"] + list(args), 0, '{"type":"text","text":"pong"}', "")
+
+    manager._run_cli = fake_answer
+    status, _ = manager.probe("http://127.0.0.1:40000", cwd=tempfile.gettempdir(),
+                              model="opencode/model-a")
+    ok &= check("probe com pong vira ok", status == "ok", status)
 
     class FakeProcess:
         pid = 424242

@@ -44,7 +44,7 @@
 
 **CodeOpenFreedom** is an automated resilience and connectivity management layer engineered for software developers utilizing the **OpenCode CLI** on Windows systems.
 
-Operating transparently between the local console and external API endpoints, the application provisions a dedicated local proxy tunnel via **Cloudflare WARP (local port 40000)** and watches the OpenCode log for real usage-limit errors. When a limit is confirmed, it rotates the WARP route, validates it with a real model call, resumes the previous conversation, and reopens the TUI on the new route.
+Operating transparently between the local console and external API endpoints, the application provisions a dedicated local proxy tunnel via **Cloudflare WARP (local port 40000)** and watches the OpenCode log for real usage-limit errors. When a limit is confirmed, it identifies the conversation and its model in the local database, hunts for a route that accepts that model by rotating the WARP egress like the original launcher, validates each route with a real model call, and falls back to another free model when no route accepts it. It then resumes the same conversation with `-s`/`-m` and reopens the TUI.
 
 ---
 
@@ -54,7 +54,7 @@ Operating transparently between the local console and external API endpoints, th
   <tr>
     <td width="50%" valign="top">
       <h4>Log-Driven Usage-Limit Failover</h4>
-      <p>Watches only new <code>level=ERROR</code> log lines, waits four seconds for the error block to finish, then stops the TUI, renews the WARP registration, validates the new egress with a real model call, resumes the conversation with <code>opencode run --auto -c "continue"</code>, and reopens the TUI with <code>--continue</code>. A later <code>level=INFO</code> line never cancels a confirmed limit. Pure HTTP 429 responses are surfaced but not rotated automatically by default.</p>
+      <p>Watches only new <code>level=ERROR</code> log lines, waits four seconds for the error block to finish, then stops the TUI and reads the conversation and its model from the local database. It hunts for a route that accepts that model: rotates the WARP egress up to <code>hunt_max</code> times, probes each route with <code>-m &lt;model&gt;</code> (a route only passes when the model answers <code>pong</code>), and resumes the same conversation with <code>opencode run --auto -s &lt;id&gt; -m &lt;model&gt;</code>. If no route accepts the model, it falls back to another <code>*-free</code> model on the current route. A later <code>level=INFO</code> line never cancels a confirmed limit. Pure HTTP 429 responses are surfaced but not rotated automatically by default.</p>
     </td>
     <td width="50%" valign="top">
       <h4>Session Isolation & Backup</h4>
@@ -82,7 +82,7 @@ The table below contrasts standard OpenCode CLI operation against the managed ar
 | Operational Scenario | Standard Workflow (Without CodeOpenFreedom) | With CodeOpenFreedom |
 | :--- | :--- | :--- |
 | **Rate Limit Exceeded (HTTP 429)** | Workflow halted; requires indeterminate idle wait | Detected in the log; manual route failover available (~15 s) |
-| **Quota Depletion** | Manual interruption and loss of development velocity | Automatic rotate → probe → resume → reopen, with a 5-per-30-min anti-loop gate |
+| **Quota Depletion** | Manual interruption and loss of development velocity | IP hunt + probe with the conversation model → model fallback → resume → reopen, with a 5-per-30-min anti-loop gate |
 | **Data Integrity** | High risk of chat history loss during manual cleanup | Automatic timestamped backup archive to Desktop |
 | **Proxy Configuration** | Manual execution of console network commands | Autonomous, transparent routing on local port 40000 |
 | **Interface Stability** | Terminal susceptible to flicker and thread locking | Smooth, flicker-free ANSI TUI on Windows Terminal |

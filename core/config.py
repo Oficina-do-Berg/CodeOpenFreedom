@@ -27,11 +27,21 @@ class Config:
         "resume_timeout": 180,        # segundos; o main usa 600, 180 é mais ágil
         "resume_auto": True,          # passa --auto no run -c
 
-        # --- prova da rota nova (equivalente ao probe do main) ---
+        # --- prova da rota/modelo novo (equivalente ao probe do main) ---
         "probe_enabled": True,
         "probe_timeout": 120,
-        "probe_model": "",            # vazio = modelo padrão do OpenCode
+        "probe_model": "",            # vazio = usa o modelo da própria conversa
         "debug_keep_probe_sessions": False,
+
+        # --- caçada de IP (mesma lógica do main) ---
+        "hunt_max": 10,              # tentativas de rotação por desbloqueio (main: 10 desktop / 20 .bat)
+        "probe_broken_max": 2,       # probes quebrados seguidos antes de aceitar sem probe
+
+        # --- troca de modelo (fallback do LIMIT_ACTION=provider do .bat) ---
+        "max_model_switches": 5,     # modelos testados no fallback
+        "model_candidates": [],       # modelos extras, ex.: ["meuprovider/modelo"]
+        "last_good_model": "",       # último modelo que passou no probe
+        "model_switch_fallback": True,
 
         # --- anti-loop (equivalente ao rot_gate do main) ---
         "max_rotations_per_window": 5,

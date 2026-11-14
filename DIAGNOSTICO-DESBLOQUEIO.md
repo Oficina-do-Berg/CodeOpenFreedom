@@ -2,117 +2,161 @@
 
 ## Sintoma
 
-O launcher do main detectava o limite e desbloqueava o OpenCode. O projeto
-simples recebia o mesmo erro no log, mas registrava
-`Erro de limite seguido de atividade normal; a sessão se recuperou sozinha`
-e seguia em frente sem rotacionar o WARP.
-
-## Causa raiz
-
-`core/monitor.py`, no método `_decide`:
-
-1. o monitor encontrava um `level=ERROR` com `Free usage limit reached`;
-2. esperava `settle_seconds`;
-3. relia o log e, se encontrasse **qualquer** linha `level=INFO` ou
-   `level=DEBUG` depois do erro, cancelava a rotação.
-
-O OpenCode continua escrevendo INFO depois de recusar a requisição: MCP
-conectado, watcher, eventos, reconexão. O limite real era sempre cancelado
-por uma linha de INFO escrita cerca de 1 segundo depois.
-
-Evidência no log do simples (`~/.opencode-infinity-simple/logs/20261114.log`):
+O launcher detectava o limite no log, rotacionava o WARP com sucesso e ainda
+assim a conversa voltava com `Free usage limit reached` até esgotar as
+tentativas. O log mostrava sempre a mesma sequência:
 
 ```text
-2026-11-14 13:07:53 | INFO | core.monitor | Erro de limite seguido de atividade normal; a sessão se recuperou sozinha.
-2026-11-14 13:08:19 | INFO | core.monitor | Erro de limite seguido de atividade normal; a sessão se recuperou sozinha.
+🚨 Limite de uso confirmado no log.
+2️⃣ Tentativa 1/3: rotacionando o WARP...
+✅ IP rotacionado com sucesso: ... → ...
+🧪 Testando a rota nova com uma chamada de modelo...
+💬 Retomando a conversa: run -c "continue"
+⚠️ A conversa ainda bateu no limite; rotacionando de novo...
 ```
 
-Evidência no log real do OpenCode (`~/.local/share/opencode/log/opencode.log`):
+## Causa raiz (comprovada)
 
-```text
-16:10:07.539 level=ERROR message="Failed to drain Session"
-             cause="AI.Error: Free usage limit reached..."
-16:10:08.754 level=INFO  message="mcp connected"
-16:10:08.758 level=INFO  message=event ...
-```
+O limite gratuito do OpenCode **não é por IP**: é por **modelo**. Cada modelo
+`*-free` do provider `opencode` tem a sua própria cota (janela de algumas
+horas, com `retryAfterMs` na resposta 429). Girar o registro do WARP troca o
+IP, mas não devolve a cota do modelo que a conversa usa.
 
-Com a regra antiga, o INFO de 1,2 s depois anulava o ERROR de cota.
+O `core/opencode.py` fazia o probe **sem `-m`**. Sem modelo explícito, o
+OpenCode escolhe o modelo padrão (`iceman-free` no ambiente testado), que
+ainda tinha cota. O probe então respondia `ok` e o launcher acreditava na
+rota nova. A retomada, porém, usa o modelo fixado na sessão
+(`deepseek-v4.1-flash-free`), que estava esgotado — daí o 429 imediato.
 
-## O que o main faz diferente
+Ou seja: o probe testava um modelo, a retomada usava outro, e o IP não tinha
+nada a ver com o problema. Além disso, o probe aceitava qualquer retorno `0`
+como rota boa, mesmo quando o modelo não respondia à pergunta pedida.
 
-- No `OpenCode Infinite.bat`, `:scan_log` classifica cada linha na ordem
-  `noop` → `rotate` → `ask` e para no primeiro `rotate`. Não existe a
-  janela de "recuperação" por INFO. O watcher contínuo do `.bat` está
-  desligado por padrão (`WATCH=0`); quem desbloqueia no dia a dia é o app
-  desktop, que escuta o evento `provider.free-limit` e chama a rotação.
-- O main guarda os PIDs que iniciou (`OC_PIDS`) e só mata esses. O simples
-  procurava qualquer `opencode.exe` da máquina; em 14/11 chegou a parar o
-  TUI do main (PID 9244) enquanto o TUI do simples era outro.
-- O probe do main usa `--standalone --archived` e mantém a sessão de teste
-  fora da lista. No `.bat`, saída `0` é rota boa; só uma execução que falhou
-  lê o texto de limite.
-- O main prefere o caminho de OpenCode que ele mesmo detectou. O simples
-  pegava o primeiro `opencode` do `PATH`, que era o atalho
-  `...\opencode-infinite\bin\opencode.CMD` criado pelo main.
+### Evidência (14/11, OpenCode 2.2.7)
+
+Testes controlados, todos com o proxy WARP novo e válido (`warp=on`):
+
+| Teste | Modelo | Resultado |
+|---|---|---|
+| sessão nova, sem `-m` | `opencode/iceman-free` (padrão) | rc=0, resposta "ok" |
+| sessão nova, `-m` explícito | `opencode/deepseek-v4.1-flash-free` | 429 `FreeUsageLimitError` |
+| sessão nova, `-m` explícito | `opencode/glm-5.3-flash-free` | 429 `FreeUsageLimitError` |
+| sessão existente, `-s` | `deepseek-v4.1-flash-free` | 429 `FreeUsageLimitError` |
+| sessão existente, `-s` + `-m` | `opencode/iceman-free` | rc=0, conversa retomada |
+
+O 429 traz `"retryAfterMs"` (≈ 3h no dia do teste). O mesmo IP aceitava um
+modelo com cota e recusava outro esgotado; um IP novo recusava o modelo
+esgotado do mesmo jeito.
+
+O log do OpenCode confirma que o probe criava uma sessão nova e que a
+retomada escrevia no `ses_...` da conversa, com o modelo antigo.
+
+## O que o main fazia diferente
+
+O `OpenCode Infinite.bat` original usa o modelo da conversa nas duas pontas:
+
+- `PROBE_MODEL`/`OC_MODEL` fazem o probe e a retomada usarem o mesmo modelo;
+- o probe só aprova a rota quando o modelo responde exatamente `pong`;
+- a caçada gira o IP até `hunt_max` vezes (10 no desktop, 20 no `.bat`)
+  testando esse modelo;
+- se a caçada esgota, o `.bat` troca de modelo
+  (`LIMIT_ACTION=provider` + `LIMIT_MODEL`) antes de desistir.
+
+Sem os campos de modelo, o main também depende do modelo padrão e sofre do
+mesmo 429 quando a cota do modelo da conversa acabou.
 
 ## Correções aplicadas
 
-### `core/monitor.py`
-
-- Removida a recuperação por INFO/DEBUG. Um `rotate` confirmado sempre
-  retorna `rotate`.
-- `settle_seconds` continua apenas como debounce para o bloco de erro
-  terminar de ser escrito.
-- O log agora mostra a linha exata que disparou o desbloqueio.
-
 ### `core/opencode.py`
 
-- `find_opencode` prefere o `.exe` real do npm
-  (`%APPDATA%\npm\node_modules\@opencode\cli\bin\opencode.exe`) e ignora o
-  atalho do launcher do main.
-- `find_running_pid(only_dir=...)` e `stop()` só param o TUI do próprio
-  launcher (PID registrado) ou um TUI na mesma pasta de trabalho. O deep
-  reset usa `force_all=True` porque é uma ação destrutiva explícita.
-- `start()` só recusa abrir se já existir um TUI na mesma pasta; o TUI de
-  outro projeto não bloqueia mais.
-- O probe usa `--archived` quando o CLI suporta, trata `returncode == 0`
-  como rota boa antes de ler texto de limite e considera 429/rate limit
-  como rota queimada.
-- `supports_archived()` detecta o flag sem quebrar versões antigas.
+- `latest_session(cwd)`: lê `session_v2` no banco local e devolve a sessão
+  mais recente da pasta, o modelo real (`provider/modelo`) e o diretório.
+  É esse modelo que precisa ser testado nas duas pontas.
+- `list_free_models()`: lista os modelos `opencode/*-free` via
+  `opencode models`.
+- `model_last_used()`: última utilização de cada modelo, para o fallback
+  tentar primeiro os menos usados (maior chance de cota livre).
+- `retry_after_ms(text)`: extrai o `retryAfterMs` do erro 429.
+- `probe(..., model=...)`: o probe recebe o modelo da conversa (`-m`) e só
+  aprova a rota quando a resposta contém `pong`. `rc=0` sem `pong` vira
+  `broken`; 429/limite vira `burned`; timeout continua `timeout`.
+- `resume(..., model=..., session_id=...)`: retoma a **mesma sessão**
+  (`-s <id>`), com `-m <modelo>` explícito. Um `-m` novo troca o modelo
+  fixado na conversa; é isso que desbloqueia.
+- `resume()` não classifica mais um retorno `0` como limite só porque o texto
+  da resposta contém "usage limit". Só erro explícito (`provider.free-limit`,
+  `FreeUsageLimitError`) ou retorno diferente de zero viram `limit`.
 
 ### `core/orchestrator.py`
 
-- `_run_unlock` para o monitor antes de girar o WARP, evitando um segundo
-  gatilho durante probe/retomada.
+Fluxo (o mesmo do main, com fallback de modelo):
 
-### Documentação
+1. detecta o limite no log;
+2. identifica a conversa e o modelo que ela usa;
+3. para o TUI (e o serviço de background, se existir);
+4. caça uma rota que aceite esse modelo: gira o IP até `hunt_max` vezes,
+   reinicia o serviço e faz o probe com `-m <modelo>`;
+5. probe quebrado `probe_broken_max` vezes seguidas desliga o probe e segue
+   só com a retomada (equivalente ao `PROBE=0` do `.bat`);
+6. quando o probe passa, retoma a mesma conversa com `-s <id> -m <modelo>`;
+7. se a caçada esgota, troca para outro modelo livre na rota atual
+   (`model_switch_fallback`, equivalente ao `LIMIT_ACTION=provider`);
+8. reabre o TUI com `--continue` e volta a monitorar.
 
-- README (inglês, português e espanhol) e `GUIA-COMPLETO.md` atualizados
-  para não falar mais em "sessão se recupera sozinha".
+O modelo que passou no probe fica salvo em `last_good_model` no
+`~/.opencode-infinity-simple/config.json` e é testado primeiro na próxima
+vez.
+
+### `core/config.py`
+
+Novas opções:
+
+```json
+{
+  "hunt_max": 10,
+  "probe_broken_max": 2,
+  "max_model_switches": 5,
+  "model_candidates": [],
+  "last_good_model": "",
+  "model_switch_fallback": true
+}
+```
+
+`model_candidates` aceita modelos extras (por exemplo, de um provider pago)
+para serem testados no fallback antes dos gratuitos.
 
 ## Testes
 
-- `python test_fluxo.py` → **8/8 grupos**. Inclui a regressão
-  `ERROR de limite + INFO posterior → rotate`.
-- `python test_orquestrador.py` → **6/6 cenários**.
-- Bloco real do log de 14/11 reprocessado: agora retorna `rotate`.
-- Verificação de processo: o TUI atual roda em
-  `...\opencode-infinite-main`; `find_running_pid(only_dir=...simple)`
-  retorna `None`, então o simples não para mais o TUI do main.
+- `python test_orquestrador.py` → **10/10 cenários**.
+  Inclui: rota nova aceita o modelo, rota limitada (gira de novo), retomada
+  limitada, sem conversa, caçada esgotada, fallback de modelo, probe
+  quebrado, anti-loop, retomada com retorno não-padrão e concorrência.
+- `python test_fluxo.py` → **8/8 grupos** (regressão do monitor, comandos e
+  probe com `pong`).
+- `python test_correcao.py`, `test_reset.py`, `test_sistema.py` → OK.
+
+Validação real com o OpenCode 2.2.7 e WARP ligado:
+
+```text
+opencode/deepseek-v4.1-flash-free -> burned (retryAfterMs ≈ 3h)
+opencode/iceman-free              -> ok (pong)
+sessão retomada com -s ses_... -m opencode/iceman-free -> rc=0
+```
 
 ## Como validar na prática
 
-1. Feche o launcher do main; os dois disputam o mesmo WARP e o mesmo log.
-2. Deixe o Cloudflare WARP ligado e rode `INICIAR.bat`.
-3. Use o chat até atingir o limite. O log do simples deve mostrar
-   `Limite de uso confirmado no log`, seguido de rotação, probe, retomada
-   e reabertura do TUI.
-
-## Observações
-
-- Rate limit puro (HTTP 429) continua sendo `ask` no monitor: não rotaciona
-  sozinho por padrão. O probe trata 429 como rota ruim, igual ao desktop do
-  main.
-- O `~/.config/opencode/opencode.json` atual tem `provider` e `model` em
-  formato inválido (`skipped malformed recognized value`). Isso não é a
-  causa do desbloqueio, mas pode afetar o modelo usado no probe/retomada.
+1. Deixe o Cloudflare WARP ligado e rode `INICIAR.bat`.
+2. Use o chat até atingir o limite.
+3. O log do simples deve mostrar, em ordem:
+   - `Alvo: ses_... | modelo: opencode/...`
+   - `2️⃣ Caçando uma rota que aceite opencode/... (até 10 rotações...)`
+   - `Tentativa N/10: trocando o IP...`
+   - `✅ Nova rota: ...`
+   - `🧪 Testando a rota nova com uma chamada de modelo...`
+   - `💬 Retomando ses_... com o modelo opencode/...`
+   - `✅ Conversa retomada com o modelo opencode/...`
+   - `✅ DESBLOQUEIO CONCLUÍDO`
+4. Se nenhuma rota aceitar o modelo, aparece
+   `Nenhuma rota aceitou esse modelo; tentando outro modelo livre`.
+5. Se todos os modelos livres estiverem esgotados, o log informa em quantas
+   horas a próxima cota volta. Nesse caso, nem IP novo resolve.

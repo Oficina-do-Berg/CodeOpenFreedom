@@ -117,10 +117,16 @@ Você verá a tela principal:
 **Quando um limite real aparece no log:**
 1. Confirma que é `level=ERROR` e espera 4 segundos para o bloco de erro terminar (uma linha INFO posterior não cancela o limite)
 2. Para o TUI (e o serviço de background, se existir)
-3. Rotaciona o WARP e confere que o IP realmente mudou
-4. Faz uma chamada real de teste (probe) com `opencode run --standalone` (e `--archived`, quando o CLI suporta)
-5. Retoma a conversa com `opencode run --auto -c "continue"`
-6. Reabre o TUI com `--continue` e volta a monitorar
+3. Identifica no banco local a conversa e o **modelo** que ela usa
+4. Caça uma rota que aceite esse modelo: gira o IP do WARP até 10 vezes e faz o probe com `-m <modelo>` (o probe só aprova quando o modelo responde `pong`)
+5. Retoma a mesma conversa com `opencode run --auto -s <id> -m <modelo>`
+6. Se nenhuma rota aceitar o modelo, troca para outro modelo `*-free` na rota atual (o limite do OpenCode é por modelo, não por IP)
+7. Reabre o TUI com `--continue` e volta a monitorar
+
+O modelo que passou no probe fica salvo em `last_good_model` no
+`~/.opencode-infinity-simple/config.json` e é testado primeiro na próxima vez.
+Se a caçada de IP e o fallback de modelo esgotarem, o log informa em quantas
+horas a próxima cota volta.
 
 **Anti-loop:** no máximo 5 desbloqueios a cada 30 minutos. Ao passar disso, o
 automático para e avisa no log, em vez de girar IP sem parar.
@@ -133,7 +139,7 @@ temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 2. Selecione `[ INICIAR OPENCODE ]` e pressione ENTER
 3. Trabalhe normalmente; o desbloqueio acontece sozinho ao atingir o limite
 
-**Quando usar:** quando você vai trabalhar por horas e quer que o IP rotacione sozinho
+**Quando usar:** quando você vai trabalhar por horas e quer que o desbloqueio aconteça sozinho (caçada de IP igual ao main + fallback para outro modelo livre)
 
 ---
 
@@ -150,7 +156,7 @@ temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 2. Pressione ENTER
 3. Aguarde ~16 segundos
 
-**Quando usar:** quando você atingiu o limite e quer rotacionar manualmente
+**Quando usar:** quando você precisa de um IP novo na hora (bloqueio regional, teste de rota ou rate limit por IP). Para cota gratuita de modelo esgotada, use `[ INICIAR OPENCODE ]`: ele caça uma rota que aceite o modelo e, se não houver, troca para outro modelo livre.
 
 ---
 
@@ -203,7 +209,8 @@ Mostra o resumo das funções, teclas e requisitos.
 O programa vai:
 - ✓ Abrir o OpenCode já roteado pelo WARP
 - ✓ Monitorar somente erros novos do log
-- ✓ Rotacionar, testar a rota e retomar a conversa automaticamente
+- ✓ Girar o IP do WARP como o main, testando o modelo da conversa a cada rota
+- ✓ Se nenhuma rota aceitar o modelo, trocar para outro modelo livre e retomar a conversa automaticamente
 - ✓ Reabrir o TUI na mesma conversa
 
 ---
@@ -215,7 +222,7 @@ O programa vai:
 2. Selecione o idioma
 3. Confirme que o aplicativo Cloudflare WARP está ligado
 4. Selecione [ INICIAR OPENCODE ]
-5. Quando atingir limite: [ ROTACIONAR IP ]
+5. Quando atingir limite: deixe o automático agir (ele caça uma rota que aceite o modelo e troca de modelo se a cota acabou). Use [ ROTACIONAR IP ] apenas para blocos regionais.
 6. Repita passo 5 quando necessário
 ```
 
@@ -300,14 +307,21 @@ npm install -g @opencode/cli
 
 ### ❌ Problema: o desbloqueio automático não acontece
 **Causa:** o monitor só considera linhas `level=ERROR` **novas**, com timestamp
-posterior ao início do monitoramento.
+posterior ao início do monitoramento. Além disso, o limite gratuito do
+OpenCode é **por modelo**: se a cota do modelo da conversa acabou, girar o IP
+não devolve essa cota; o launcher precisa trocar de modelo.
 
 **Solução:**
 1. Confirme que o WARP está ligado e que o OpenCode foi aberto pelo CodeOpen
 2. Veja o log do CodeOpen em `~/.opencode-infinity-simple/logs/` (arquivo do dia)
-3. Se aparecer "Limite de rotações automáticas atingido", aguarde a janela de
+3. Procure por `Caçando uma rota que aceite`, `Nova rota`, `Conversa retomada
+   com o modelo` e `Nenhuma rota aceitou esse modelo; tentando outro modelo
+   livre`. Se aparecer `Nenhuma rota nem modelo livre aceitou`, aguarde o
+   tempo indicado (≈ 3h) ou configure `model_candidates` com um
+   provider/modelo pago no `config.json`
+4. Se aparecer "Limite de desbloqueios automáticos atingido", aguarde a janela de
    30 minutos ou use [ ROTACIONAR IP ] manualmente
-4. Rate limit puro (HTTP 429) **não** rotaciona sozinho por padrão; use
+5. Rate limit puro (HTTP 429) **não** rotaciona sozinho por padrão; use
    [ ROTACIONAR IP ] se quiser trocar a rota
 
 ---

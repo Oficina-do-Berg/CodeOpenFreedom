@@ -1,14 +1,18 @@
 """
 Orquestrador - Fluxo completo de desbloqueio
 
-Sequência (a mesma do main):
-1. limite real detectado no log;
-2. para o TUI;
-3. rotaciona o WARP;
-4. testa a rota nova com uma chamada de modelo (probe);
-5. retoma a conversa com `opencode run --auto -c "continue"`;
-6. reabre o TUI com --continue;
-7. volta a monitorar somente linhas novas.
+Mesma lógica do main:
+
+1. limite real detectado;
+2. descobre a conversa e o modelo que ela usa;
+3. para o TUI;
+4. caça de IP: troca o registro do WARP, testa a rota com o modelo da
+   conversa (probe com "pong") e repete até o probe passar ou até o limite
+   de tentativas (o main usa 10 no desktop e 20 no .bat);
+5. retoma a mesma conversa na rota aprovada;
+6. se a caçada inteira falhar, tenta outro modelo livre na rota atual
+   (equivalente ao LIMIT_ACTION=provider do .bat);
+7. reabre o TUI e volta a monitorar linhas novas.
 """
 
 import os
@@ -23,7 +27,7 @@ logger = get_logger(__name__)
 
 
 class Orchestrator:
-    """Gerencia o fluxo: monitorar → detectar limite → rotacionar → provar → retomar."""
+    """Gerencia o fluxo: monitorar → detectar limite → caçar rota → retomar."""
 
     def __init__(self, connection_manager, opencode_manager, rotator, monitor, config):
         self.connection = connection_manager
@@ -32,6 +36,7 @@ class Orchestrator:
         self.monitor = monitor
         self.config = config
         self.rotation_count = 0
+        self.model_switch_count = 0
         self.working_dir: Optional[str] = None
         self.last_result = ""
         self.is_unlocking = False
@@ -81,6 +86,84 @@ class Orchestrator:
             self._handling.release()
 
     # --------------------------------------------------------------------- fluxo
+    def _model_candidates(self, current_model: Optional[str]) -> list:
+        """Modelos livres para o fallback, do mais provável ao menos usado."""
+        seen = set()
+        ordered = []
+
+        def add(model):
+            if model and model not in seen:
+                seen.add(model)
+                ordered.append(model)
+
+        add(current_model)
+        add(self.config.get('last_good_model'))
+        for model in self.config.get('model_candidates') or []:
+            add(model)
+
+        try:
+            free = self.opencode.list_free_models() or []
+            usage = self.opencode.model_last_used() or {}
+            free = sorted(free, key=lambda m: usage.get(m, 0))
+        except Exception as e:
+            logger.debug(f"Falha ao listar modelos livres: {e}")
+            free = []
+
+        for model in free:
+            add(model)
+
+        limit = max(1, int(self.config.get('max_model_switches', 5)))
+        return ordered[:limit]
+
+    def _remember_model(self, model: Optional[str]) -> None:
+        if not model:
+            return
+        if self.config.get('last_good_model') == model:
+            return
+        try:
+            self.config.set('last_good_model', model)
+        except Exception as e:
+            logger.debug(f"Não foi possível salvar o modelo bom: {e}")
+
+    def _restart_service(self):
+        if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
+            self.opencode.restart_service(self.connection.proxy_url)
+
+    def _resume_target(self, workdir: str, session_id: Optional[str],
+                       model: Optional[str]) -> tuple:
+        """Retoma a conversa e classifica o resultado."""
+        rstatus, rdetail = self.opencode.resume(
+            self.connection.proxy_url, cwd=workdir, model=model, session_id=session_id
+        )
+
+        if rstatus == 'ok':
+            logger.info(f"✅ Conversa retomada com o modelo {model or 'padrão'}.")
+            self._remember_model(model)
+            return True, f"modelo {model or 'padrão'}"
+        if rstatus == 'no_session':
+            logger.info("ℹ️ Não existe conversa anterior para retomar.")
+            return True, "sem conversa"
+        if rstatus == 'auth':
+            logger.warning(
+                "⚠️ O OpenCode pediu login; não adianta trocar modelo ou IP. "
+                "Reabrindo para você autenticar."
+            )
+            return True, "login necessário"
+        if rstatus == 'limit':
+            logger.warning("   ⚠️ A retomada também bateu no limite; girando de novo...")
+            return False, rdetail
+        if rstatus == 'timeout':
+            logger.warning("   ⚠️ A retomada expirou; girando de novo...")
+            return False, rdetail
+
+        # Probe passou e a retomada deu erro não relacionado a cota
+        # (ex.: nenhuma mensagem pendente). A rota/modelo é boa.
+        logger.warning(
+            f"ℹ️ Retomada com retorno não-padrão ({rdetail[:160]}), "
+            "mas a rota foi validada no probe. Prosseguindo..."
+        )
+        return True, f"modelo {model or 'padrão'} (aviso)"
+
     def _run_unlock(self):
         logger.info("=" * 60)
         logger.info("🚨 LIMITE DETECTADO - iniciando desbloqueio")
@@ -92,7 +175,7 @@ class Orchestrator:
 
         if not self._rotation_allowed():
             logger.error(
-                "❌ Limite de rotações automáticas atingido "
+                "❌ Limite de desbloqueios automáticos atingido "
                 f"({self.config.get('max_rotations_per_window', 5)} em "
                 f"{self.config.get('rotation_window_minutes', 30)} min). "
                 "Automático pausado para não entrar em loop."
@@ -101,105 +184,130 @@ class Orchestrator:
             return
 
         workdir = self.working_dir or os.getcwd()
-        attempts = max(1, int(self.config.get('max_retries', 3)))
+        session_id = None
+        session_model = None
+        try:
+            session_id, session_model, session_dir = self.opencode.latest_session(workdir)
+            if session_dir:
+                workdir = session_dir
+        except Exception as e:
+            logger.debug(f"Não foi possível ler a sessão atual: {e}")
+
+        probe_model = self.config.get('probe_model') or session_model
+        logger.info(
+            "Alvo: "
+            + (session_id or "conversa mais recente da pasta")
+            + " | modelo: "
+            + (probe_model or "padrão do OpenCode")
+        )
 
         # 1. parar o TUI (o serviço v2 não é usado: TUI/probe/resume usam --standalone)
         logger.info("1️⃣ Parando o TUI do OpenCode...")
         self.opencode.stop()
 
-        # se o TUI antigo usava o serviço de background, ele precisa cair
-        # também; senão o probe/resume podem reutilizar a rota velha.
         if self.opencode.is_service_running():
             logger.info("   Parando o serviço de background (rota antiga)...")
             self.opencode.stop_service()
 
         time.sleep(1)
 
-        resumed = False
+        hunt_max = max(1, int(self.config.get('hunt_max') or self.config.get('max_retries', 10)))
+        probe_enabled = bool(self.config.get('probe_enabled', True))
+        probe_broken_max = max(1, int(self.config.get('probe_broken_max', 2)))
+        retry_delay = int(self.config.get('retry_delay', 5))
 
-        for attempt in range(1, attempts + 1):
-            logger.info(f"2️⃣ Tentativa {attempt}/{attempts}: rotacionando o WARP...")
+        resumed = False
+        unlock_reason = ""
+        last_retry_ms = 0
+        broken = 0
+
+        logger.info(
+            f"2️⃣ Caçando uma rota que aceite {probe_model or 'o modelo padrão'} "
+            f"(até {hunt_max} rotações, igual ao main)..."
+        )
+
+        for attempt in range(1, hunt_max + 1):
+            logger.info(f"   Tentativa {attempt}/{hunt_max}: trocando o IP...")
             if not self.rotator.rotate(max_retries=1):
-                logger.warning("⚠️ A rotação falhou; tentando novamente...")
-                time.sleep(int(self.config.get('retry_delay', 5)))
+                logger.warning("   ⚠️ A rotação do WARP falhou; tentando de novo...")
+                time.sleep(retry_delay)
                 continue
 
-            proxy_url = self.connection.proxy_url
-            logger.info(f"✅ Nova rota: {self.connection.current_ip}")
+            logger.info(f"   ✅ Nova rota: {self.connection.current_ip}")
+            self._restart_service()
 
-            # Reiniciar o serviço de background sob o novo proxy (padrão do main)
-            if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
-                self.opencode.restart_service(proxy_url)
+            if probe_enabled:
+                status, detail = self.opencode.probe(
+                    self.connection.proxy_url, cwd=workdir, model=probe_model
+                )
 
-            # 3. provar a rota nova antes de retomar
-            if self.config.get('probe_enabled', True):
-                status, detail = self.opencode.probe(proxy_url, cwd=workdir)
                 if status == 'burned':
+                    last_retry_ms = max(last_retry_ms, self.opencode.retry_after_ms(detail))
                     logger.warning(
-                        "⚠️ A rota nova também está limitada; rotacionando de novo..."
+                        f"   ⚠️ A rota {attempt} ainda está limitada para "
+                        f"{probe_model or 'o modelo padrão'}; girando de novo..."
                     )
                     continue
                 if status == 'timeout':
-                    logger.warning("⚠️ O probe não respondeu; tentando outra rota...")
+                    logger.warning("   ⚠️ O probe não respondeu; girando de novo...")
+                    continue
+                if status == 'broken':
+                    broken += 1
+                    logger.warning(
+                        f"   ⚠️ O probe falhou por outro motivo ({detail[:160]})."
+                    )
+                    if broken >= probe_broken_max:
+                        logger.warning(
+                            "   ⚠️ O probe está quebrado (não é limite). "
+                            "Continuando sem probe, como o .bat com PROBE=0."
+                        )
+                        probe_enabled = False
+                    continue
+
+            # Rota aprovada no probe (ou probe desativado): retomar a conversa.
+            ok, reason = self._resume_target(workdir, session_id, probe_model)
+            if ok:
+                resumed = True
+                unlock_reason = reason
+                break
+            time.sleep(retry_delay)
+
+        # 3. Fallback do .bat (LIMIT_ACTION=provider): a caçada de IP não
+        # resolveu; tenta outro modelo livre na rota atual.
+        if not resumed and probe_enabled and self.config.get('model_switch_fallback', True):
+            logger.info(
+                "3️⃣ Nenhuma rota aceitou esse modelo; tentando outro modelo livre "
+                "na rota atual (fallback do .bat)..."
+            )
+            for model in self._model_candidates(probe_model):
+                if not model or model == probe_model:
+                    continue
+
+                status, detail = self.opencode.probe(
+                    self.connection.proxy_url, cwd=workdir, model=model
+                )
+                if status == 'burned':
+                    last_retry_ms = max(last_retry_ms, self.opencode.retry_after_ms(detail))
+                    logger.warning(f"   ⚠️ {model}: cota gratuita também esgotada...")
+                    continue
+                if status in ('timeout',):
+                    logger.warning(f"   ⚠️ {model}: o teste não respondeu...")
                     continue
                 if status == 'broken':
                     logger.warning(
-                        f"⚠️ O probe falhou por outro motivo ({detail[:160]}); "
-                        "seguindo para a retomada."
+                        f"   ⚠️ {model}: o teste falhou ({detail[:160]}); tentando retomar mesmo assim."
                     )
 
-            # 4. retomar a conversa de verdade
-            if self.config.get('auto_continue', True):
-                status, detail = self.opencode.resume(proxy_url, cwd=workdir)
-
-                if status == 'limit':
-                    logger.warning(
-                        "⚠️ A conversa ainda bateu no limite; rotacionando de novo..."
-                    )
-                    continue
-                if status == 'timeout':
-                    logger.warning("⚠️ A retomada expirou; tentando outra rota...")
-                    continue
-                if status == 'no_session':
-                    logger.info("ℹ️ Não existe conversa anterior para retomar.")
+                ok, reason = self._resume_target(workdir, session_id, model)
+                if ok:
+                    self.model_switch_count += 1
                     resumed = True
-                    break
-                if status == 'auth':
-                    logger.warning(
-                        "⚠️ O OpenCode pediu login; não adianta rotacionar. "
-                        "Reabrindo para você autenticar."
-                    )
-                    resumed = True
-                    break
-                if status == 'ok':
-                    logger.info("✅ Conversa retomada na rota nova.")
-                    resumed = True
+                    unlock_reason = f"fallback: {reason}"
                     break
 
-                # Se for limite explícito ou erro formatado como limite, tenta outra rota
-                is_limited = (status == 'limit') or (
-                    hasattr(self.opencode, '_looks_limited') and self.opencode._looks_limited(detail)
-                )
-                if is_limited:
-                    logger.warning(
-                        "⚠️ A conversa ainda bateu no limite; rotacionando de novo..."
-                    )
-                    continue
-
-                # Se a rota passou no probe, ela é válida. Retornos não-zero sem texto de
-                # limite (ex.: sem mensagem pendente) não justificam descartar a rota boa.
-                logger.warning(
-                    f"ℹ️ Retomada com retorno não-padrão ({detail[:160]}), mas rota validada via probe. Prosseguindo..."
-                )
-                resumed = True
-                break
-
-            resumed = True
-            break
-
-        # 5. reabrir o TUI na mesma conversa
+        # 4. reabrir o TUI na mesma conversa
         if resumed:
-            logger.info("3️⃣ Reabrindo o OpenCode na conversa...")
+            logger.info("4️⃣ Reabrindo o OpenCode na conversa...")
             if self.opencode.start(
                 proxy_url=self.connection.proxy_url,
                 continue_session=True
@@ -207,10 +315,10 @@ class Orchestrator:
                 self.rotation_count += 1
                 self.last_result = "desbloqueado"
                 if self.config.get('auto_rotate', True):
-                    logger.info("4️⃣ Reativando o monitor (somente linhas novas)...")
+                    logger.info("5️⃣ Reativando o monitor (somente linhas novas)...")
                     self.monitor.start()
                 logger.info("=" * 60)
-                logger.info("✅ DESBLOQUEIO CONCLUÍDO")
+                logger.info(f"✅ DESBLOQUEIO CONCLUÍDO ({unlock_reason})")
                 logger.info("=" * 60)
                 return
 
@@ -218,11 +326,19 @@ class Orchestrator:
             self.last_result = "falha ao reabrir"
             return
 
-        # 6. todas as tentativas falharam: reabre para o usuário ver o erro
-        logger.error(
-            "❌ Não foi possível desbloquear após as tentativas. "
-            "Automático pausado."
-        )
+        # 5. todas as tentativas falharam: reabre para o usuário ver o erro
+        if last_retry_ms:
+            hours = last_retry_ms / 3600000
+            logger.error(
+                "❌ Nenhuma rota nem modelo livre aceitou a conversa. "
+                f"A próxima cota deve voltar em ~{hours:.1f}h. "
+                "Troque de modelo manualmente ou conecte um provider pago."
+            )
+        else:
+            logger.error(
+                "❌ Não foi possível desbloquear após as tentativas. "
+                "Automático pausado."
+            )
         self.last_result = "falha no desbloqueio"
         self.opencode.start(
             proxy_url=self.connection.proxy_url,
@@ -254,8 +370,7 @@ class Orchestrator:
         logger.info(f"   IP: {self.connection.current_ip}")
 
         # Reiniciar o serviço de background sob o novo proxy (padrão do main)
-        if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
-            self.opencode.restart_service(self.connection.proxy_url)
+        self._restart_service()
 
         logger.info("2️⃣ Iniciando OpenCode...")
         success = self.opencode.start(
@@ -273,7 +388,7 @@ class Orchestrator:
             logger.info("3️⃣ Iniciando monitoramento automático...")
             self.monitor.start()
             logger.info("✅ Monitoramento ativo (somente linhas novas)")
-            logger.info("   🔄 Rotação + retomada automáticas ao detectar limite")
+            logger.info("   🔄 Caça de IP + retomada automáticas ao detectar limite")
 
         logger.info("=" * 60)
         logger.info("✅ FLUXO INICIADO COM SUCESSO!")
@@ -294,5 +409,6 @@ class Orchestrator:
             'monitoring': self.monitor.is_monitoring(),
             'is_unlocking': self.is_unlocking,
             'rotation_count': self.rotation_count,
+            'model_switch_count': self.model_switch_count,
             'last_result': self.last_result,
         }
