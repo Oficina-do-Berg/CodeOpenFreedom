@@ -16,6 +16,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -523,12 +524,17 @@ class OpenCodeManager:
         return bool(self._supports_archived)
 
     def _run_cli(self, args: List[str], proxy_url: Optional[str] = None,
-                 cwd: Optional[str] = None, timeout: int = 60) -> subprocess.CompletedProcess:
+                 cwd: Optional[str] = None, timeout: int = 60,
+                 idle_timeout: Optional[int] = None) -> subprocess.CompletedProcess:
         """Roda o CLI sem janela e captura a saída.
 
         Em timeout, mata a árvore inteira. O opencode.CMD do Windows é um
         wrapper: matar só o cmd.exe deixaria o node filho rodando, segurando
         a rota antiga e o banco aberto.
+
+        idle_timeout replica o RESUME_IDLE do main: uma retomada longa pode
+        ficar minutos trabalhando, mas se não escrever nada por N segundos
+        ela está travada e é encerrada (retorno 124).
         """
         if not self.opencode_path:
             self.find_opencode()
@@ -554,6 +560,11 @@ class OpenCodeManager:
                 errors="replace",
                 creationflags=_CREATE_NO_WINDOW,
             )
+            if idle_timeout:
+                return self._communicate_with_idle(
+                    proc, cmd, timeout=timeout, idle_timeout=idle_timeout
+                )
+
             try:
                 out, err = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -573,6 +584,57 @@ class OpenCodeManager:
             if proc is not None and proc.poll() is None:
                 self._kill_tree(proc.pid)
             return subprocess.CompletedProcess(cmd, 1, "", str(e))
+
+    def _communicate_with_idle(self, proc, cmd: List[str], timeout: int,
+                               idle_timeout: int) -> subprocess.CompletedProcess:
+        """Lê stdout/stderr em threads e encerra por tempo total ou inatividade."""
+        out_parts: List[str] = []
+        err_parts: List[str] = []
+        last_activity = [time.time()]
+
+        def reader(pipe, parts):
+            try:
+                for line in iter(pipe.readline, ""):
+                    parts.append(line)
+                    last_activity[0] = time.time()
+            except (ValueError, OSError):
+                pass
+            finally:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+
+        threads = [
+            threading.Thread(target=reader, args=(proc.stdout, out_parts), daemon=True),
+            threading.Thread(target=reader, args=(proc.stderr, err_parts), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+
+        started = time.time()
+        timed_out = False
+        while proc.poll() is None:
+            now = time.time()
+            if now - started >= timeout:
+                timed_out = True
+                break
+            if now - last_activity[0] >= idle_timeout:
+                timed_out = True
+                break
+            time.sleep(0.3)
+
+        if timed_out:
+            self._kill_tree(proc.pid)
+
+        for thread in threads:
+            thread.join(timeout=5)
+
+        out = "".join(out_parts)
+        err = "".join(err_parts)
+        if timed_out:
+            return subprocess.CompletedProcess(cmd, 124, out, err + "\n[timeout]")
+        return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
     def start(self, folder: Optional[str] = None, proxy_url: Optional[str] = None,
               continue_session: bool = False, _allow_standalone: bool = True) -> bool:
@@ -664,6 +726,43 @@ class OpenCodeManager:
     _PROBE_ANSWER = re.compile(r"\bpong\b", re.IGNORECASE)
 
     @staticmethod
+    def _json_events(output: str) -> list:
+        """Eventos NDJSON do `run --format json` (linhas que não são JSON são ignoradas)."""
+        events = []
+        for line in (output or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return events
+
+    @staticmethod
+    def _event_error(events: list) -> tuple:
+        """(tipo, mensagem) do primeiro evento de erro do turno."""
+        for event in events:
+            if event.get("type") != "error":
+                continue
+            error = event.get("error") or {}
+            return str(error.get("type") or ""), str(error.get("message") or "")
+        return "", ""
+
+    @classmethod
+    def _event_is_limit(cls, error_type: str, message: str) -> bool:
+        """Erro estruturado de cota (não confunde com texto da resposta)."""
+        low = f"{error_type} {message}".lower()
+        return (
+            "free-limit" in low
+            or "free usage limit" in low
+            or "quota" in low
+            or "usage limit" in low
+        )
+
+    @staticmethod
     def _looks_limited(text: str) -> bool:
         """Só limite de cota/região: rate limit puro é temporário (ask)."""
         if not text:
@@ -712,6 +811,13 @@ class OpenCodeManager:
                 delete_args = ["--standalone"] + delete_args
             self._run_cli(delete_args, proxy_url=proxy_url, cwd=workdir, timeout=20)
 
+        # Classifica por evento estruturado. O texto da resposta e as saídas
+        # de ferramentas não podem marcar a rota como queimada.
+        events = self._json_events(result.stdout or "")
+        error_type, error_message = self._event_error(events)
+        if self._event_is_limit(error_type, error_message):
+            return "burned", (error_message or result.stdout or "")[-500:]
+
         # Padrão do desktop do main: sucesso é a resposta pedida. Um run
         # limpo sem "pong" é um probe quebrado, não uma rota aprovada.
         if result.returncode == 0:
@@ -720,8 +826,8 @@ class OpenCodeManager:
             return "broken", "o probe terminou sem a resposta esperada (pong)"
         if result.returncode == 124:
             return "timeout", "o probe não respondeu a tempo"
-        if self._PROBE_LIMIT.search(output):
-            return "burned", output[-500:]
+        if self._PROBE_LIMIT.search(result.stderr or ""):
+            return "burned", (result.stderr or "")[-500:]
         return "broken", output[-500:]
 
     def resume(self, proxy_url: Optional[str], cwd: Optional[str] = None,
@@ -760,25 +866,41 @@ class OpenCodeManager:
             + (f" com o modelo {model}" if model else "")
             + f": run {' '.join(args[1:-1])} \"{message}\""
         )
-        result = self._run_cli(args, proxy_url=proxy_url, cwd=workdir, timeout=timeout)
+        result = self._run_cli(
+            args, proxy_url=proxy_url, cwd=workdir, timeout=timeout,
+            idle_timeout=int(self.config.get("resume_idle", 60) or 0) or None
+        )
         output = (result.stdout or "") + "\n" + (result.stderr or "")
-        error_event = bool(re.search(r'"type"\s*:\s*"error"', output))
 
-        # Um retorno 0 é sucesso. Só um erro explícito (ou um retorno
-        # diferente de zero) pode classificar a retomada como limite: a
-        # resposta do modelo pode citar "usage limit" sem ter falhado.
-        if result.returncode == 0 and not error_event:
-            return "ok", ""
-        if self._looks_limited(output):
-            return "limit", output[-500:]
-        if re.search(r"no session|session not found|no such session|nothing to continue", output, re.I):
-            return "no_session", output[-500:]
-        if re.search(r"unauthorized|not logged in|authentication|auth required|please login|sign in", output, re.I):
-            return "auth", output[-500:]
+        # Primeiro os erros estruturados. Ler o texto inteiro da resposta
+        # dava falso positivo: a própria conversa pode citar "session not
+        # found" ou "usage limit" sem que a retomada tenha falhado.
+        events = self._json_events(result.stdout or "")
+        error_type, error_message = self._event_error(events)
+        if error_type:
+            low = f"{error_type} {error_message}".lower()
+            if self._event_is_limit(error_type, error_message):
+                return "limit", output[-500:]
+            if "auth" in low:
+                return "auth", output[-500:]
+
         if result.returncode == 0:
             return "ok", ""
         if result.returncode == 124:
             return "timeout", "a retomada não respondeu a tempo"
+
+        stderr = (result.stderr or "").strip()
+        if self._looks_limited(stderr):
+            return "limit", stderr[-500:]
+        if re.search(r"no session|session not found|no such session|session does not exist|unknown session|nothing to continue", stderr, re.I):
+            return "no_session", stderr[-500:]
+        if re.search(r"unauthorized|not logged in|authentication|auth required|please login|sign in", stderr, re.I):
+            return "auth", stderr[-500:]
+
+        # Últimos recursos (builds que imprimem o erro no stdout).
+        tail = output[-800:]
+        if re.search(r"no session|session not found|no such session|nothing to continue", tail, re.I):
+            return "no_session", output[-500:]
         return "error", output[-500:]
 
     # ------------------------------------------------------------------- pastas

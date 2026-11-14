@@ -16,7 +16,7 @@ class Config:
         "auto_continue": True,
         "start_continue": True,       # abre o TUI na última conversa quando existir
         "warp_port": 40000,
-        "max_retries": 3,             # tentativas de rotação por desbloqueio
+        "max_retries": 3,             # tentativas de rotação (compatibilidade; o main usa hunt_max)
         "retry_delay": 5,             # segundos entre tentativas
         "check_ip_url": "https://www.cloudflare.com/cdn-cgi/trace",
         "language": "pt_BR",
@@ -24,12 +24,13 @@ class Config:
 
         # --- retomada da conversa (equivalente ao resume_run do main) ---
         "resume_msg": "continue",
-        "resume_timeout": 180,        # segundos; o main usa 600, 180 é mais ágil
+        "resume_timeout": 600,       # main: RESUME_TIMEOUT=600
+        "resume_idle": 60,            # main: RESUME_IDLE=60 (mata só se ficar sem saída)
         "resume_auto": True,          # passa --auto no run -c
 
         # --- prova da rota/modelo novo (equivalente ao probe do main) ---
         "probe_enabled": True,
-        "probe_timeout": 120,
+        "probe_timeout": 60,          # main (desktop): 60s por probe
         "probe_model": "",            # vazio = usa o modelo da própria conversa
         "debug_keep_probe_sessions": False,
 
@@ -70,6 +71,18 @@ class Config:
                 for key, value in self.DEFAULT_CONFIG.items():
                     if key not in self.config:
                         self.config[key] = value
+
+                # Migração: 180/120 eram os padrões antigos, menores que os
+                # do main (600 de retomada + 60 de inatividade / 60 de probe).
+                migrated = False
+                if self.config.get('resume_timeout') == 180:
+                    self.config['resume_timeout'] = self.DEFAULT_CONFIG['resume_timeout']
+                    migrated = True
+                if self.config.get('probe_timeout') == 120:
+                    self.config['probe_timeout'] = self.DEFAULT_CONFIG['probe_timeout']
+                    migrated = True
+                if migrated:
+                    self.save()
             except Exception as e:
                 print(f"⚠️ Erro ao carregar config: {e}")
                 self.config = self.DEFAULT_CONFIG.copy()

@@ -83,9 +83,16 @@ mesmo 429 quando a cota do modelo da conversa acabou.
 - `resume(..., model=..., session_id=...)`: retoma a **mesma sessão**
   (`-s <id>`), com `-m <modelo>` explícito. Um `-m` novo troca o modelo
   fixado na conversa; é isso que desbloqueia.
-- `resume()` não classifica mais um retorno `0` como limite só porque o texto
-  da resposta contém "usage limit". Só erro explícito (`provider.free-limit`,
-  `FreeUsageLimitError`) ou retorno diferente de zero viram `limit`.
+- A classificação de probe e retomada usa o **evento estruturado** do
+  `run --format json` (`{"type":"error","error":{...}}`), não o texto solto.
+  A própria conversa pode citar "usage limit" ou "session not found" sem
+  falha; só `provider.free-limit`/`FreeUsageLimitError` viram `limit` e só
+  um retorno diferente de zero é lido em busca de erro no `stderr`.
+- Timeouts iguais aos do main: retomada com 600 s de teto e 60 s de
+  inatividade (`RESUME_IDLE`), probe com 60 s. Uma retomada longa continua
+  viva enquanto escreve; travada sem saída, é encerrada com `rc=124`.
+- Configs antigos (`resume_timeout=180`, `probe_timeout=120`) são migrados
+  automaticamente para os padrões do main ao carregar.
 
 ### `core/orchestrator.py`
 
@@ -118,7 +125,10 @@ Novas opções:
   "max_model_switches": 5,
   "model_candidates": [],
   "last_good_model": "",
-  "model_switch_fallback": true
+  "model_switch_fallback": true,
+  "resume_timeout": 600,
+  "resume_idle": 60,
+  "probe_timeout": 60
 }
 ```
 
@@ -131,8 +141,8 @@ para serem testados no fallback antes dos gratuitos.
   Inclui: rota nova aceita o modelo, rota limitada (gira de novo), retomada
   limitada, sem conversa, caçada esgotada, fallback de modelo, probe
   quebrado, anti-loop, retomada com retorno não-padrão e concorrência.
-- `python test_fluxo.py` → **8/8 grupos** (regressão do monitor, comandos e
-  probe com `pong`).
+- `python test_fluxo.py` → **9/9 grupos** (regressão do monitor, comandos,
+  probe com `pong`, evento estruturado de limite e timeout por inatividade).
 - `python test_correcao.py`, `test_reset.py`, `test_sistema.py` → OK.
 
 Validação real com o OpenCode 2.2.7 e WARP ligado:

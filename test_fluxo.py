@@ -281,6 +281,36 @@ def test_comandos():
                               model="opencode/model-a")
     ok &= check("probe com pong vira ok", status == "ok", status)
 
+    # A resposta da conversa pode citar "usage limit" / "no session" sem que
+    # a retomada tenha falhado: o veredito vem do evento estruturado.
+    def fake_chat_mentions_limit(args, **kwargs):
+        return sp.CompletedProcess(
+            ["opencode"] + list(args), 0,
+            '{"type":"text","text":"no session found; usage limit was mentioned"}\n'
+            '{"type":"step_finish","part":{"reason":"stop"}}',
+            "",
+        )
+
+    manager._run_cli = fake_chat_mentions_limit
+    status, detail = manager.resume("http://127.0.0.1:40000", cwd=tempfile.gettempdir(),
+                                    model="opencode/model-a", session_id="ses_x")
+    ok &= check("texto da resposta não vira limite", status == "ok", f"{status} {detail[:80]}")
+
+    def fake_limit_event(args, **kwargs):
+        return sp.CompletedProcess(
+            ["opencode"] + list(args), 1,
+            '{"type":"error","error":{"type":"provider.free-limit",'
+            '"message":"Free usage limit reached","retryAfterMs":3600000}}',
+            "",
+        )
+
+    manager._run_cli = fake_limit_event
+    status, detail = manager.resume("http://127.0.0.1:40000", cwd=tempfile.gettempdir(),
+                                    model="opencode/model-a", session_id="ses_x")
+    ok &= check("evento provider.free-limit vira limit", status == "limit", status)
+    ok &= check("retryAfterMs é lido", manager.retry_after_ms(detail) == 3600000,
+                str(manager.retry_after_ms(detail)))
+
     class FakeProcess:
         pid = 424242
 
@@ -321,6 +351,41 @@ def test_limite_seguido_de_info():
     return check("INFO posterior ainda rotaciona", action == "rotate", str(action))
 
 
+def test_timeout_por_inatividade():
+    print("\n9. Retomada longa: teto total e inatividade (padrão do main)")
+    import subprocess as sp
+
+    manager = OpenCodeManager(FakeConfig())
+
+    # processo que escreve e termina: retorno normal, sem falso timeout
+    proc = sp.Popen(
+        [sys.executable, "-c", "print('pong')"],
+        stdout=sp.PIPE, stderr=sp.PIPE, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    result = manager._communicate_with_idle(proc, ["x"], timeout=10, idle_timeout=5)
+    ok = check(
+        "processo que responde não vira timeout",
+        result.returncode == 0 and "pong" in (result.stdout or ""),
+        f"rc={result.returncode} out={result.stdout!r}",
+    )
+    ok &= check("saída é capturada", "pong" in (result.stdout or ""), repr(result.stdout))
+
+    # processo silencioso: encerrado por inatividade, antes do teto total
+    proc = sp.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdout=sp.PIPE, stderr=sp.PIPE, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    started = time.time()
+    result = manager._communicate_with_idle(proc, ["x"], timeout=20, idle_timeout=1)
+    elapsed = time.time() - started
+    ok &= check("silêncio vira retorno 124", result.returncode == 124, str(result.returncode))
+    ok &= check("encerra antes do teto total", elapsed < 10, f"{elapsed:.1f}s")
+    ok &= check("processo não fica órfão", proc.poll() is not None, str(proc.poll()))
+    return bool(ok)
+
+
 def main():
     print("=" * 70)
     print(" TESTES SEGUROS - CODEOPEN")
@@ -335,6 +400,7 @@ def main():
         test_anti_loop,
         test_comandos,
         test_limite_seguido_de_info,
+        test_timeout_por_inatividade,
     ]
 
     results = []
