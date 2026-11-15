@@ -412,6 +412,55 @@ def test_timeout_por_inatividade():
     return bool(ok)
 
 
+def test_tui_model_state():
+    print("\n10. Estado do TUI: modelo novo na frente dos recentes (model.json)")
+    import json as jsonlib
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state_dir = Path(tmp)
+        state_file = state_dir / "model.json"
+        state_file.write_text(jsonlib.dumps({
+            "recent": [
+                {"providerID": "opencode", "modelID": "deepseek-v4.1-flash-free"},
+                {"providerID": "opencode", "modelID": "glm-5.3-flash-free"},
+            ],
+            "favorite": [],
+            "variant": {"opencode/deepseek-v4.1-flash-free": "max"},
+        }, ensure_ascii=False), encoding="utf-8")
+
+        manager = OpenCodeManager(FakeConfig())
+        with patch.object(manager, "get_tui_model_state_path", return_value=state_file):
+            ok = check("variante existente é lida do mapa",
+                       manager._tui_variant_for("opencode/deepseek-v4.1-flash-free") == "max")
+            ok &= check("modelo sem variante no mapa devolve vazio",
+                        manager._tui_variant_for("opencode/beam-free") == "")
+
+            changed = manager.set_tui_model("opencode/beam-free")
+            data = jsonlib.loads(state_file.read_text(encoding="utf-8"))
+            ok &= check("gravação retorna True", changed is True)
+            ok &= check(
+                "beam-free é o primeiro dos recentes",
+                data["recent"][0] == {"providerID": "opencode", "modelID": "beam-free"},
+                str(data["recent"][:2]),
+            )
+            ok &= check(
+                "o modelo antigo não é duplicado e continua na lista",
+                data["recent"].count({"providerID": "opencode", "modelID": "deepseek-v4.1-flash-free"}) == 1,
+                str(data["recent"]),
+            )
+            ok &= check(
+                "variante do modelo novo vira default (não herda #max)",
+                data["variant"].get("opencode/beam-free") == "default",
+                str(data["variant"].get("opencode/beam-free")),
+            )
+            ok &= check(
+                "variante do deepseek preservada",
+                data["variant"].get("opencode/deepseek-v4.1-flash-free") == "max",
+            )
+    return bool(ok)
+
+
 def main():
     print("=" * 70)
     print(" TESTES SEGUROS - CODEOPEN")
@@ -427,6 +476,7 @@ def main():
         test_comandos,
         test_limite_seguido_de_info,
         test_timeout_por_inatividade,
+        test_tui_model_state,
     ]
 
     results = []

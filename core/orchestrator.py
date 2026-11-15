@@ -129,22 +129,30 @@ class Orchestrator:
 
     def _stick_model(self, session_id: Optional[str], old_model: Optional[str],
                      new_model: Optional[str]) -> None:
-        """Fixa o modelo novo na conversa, para o TUI reabrir com ele.
+        """Fixa o modelo novo na conversa E no estado do TUI.
 
-        O `-m` da retomada vale só para aquele run: em campo a sessão seguiu
-        no modelo antigo e o TUI re-limitava segundos depois do desbloqueio.
+        O `-m` da retomada vale só para aquele run; a sessão e o model.json
+        do TUI precisam ser atualizados, senão o TUI reabre no modelo
+        antigo e limita de novo segundos depois.
         """
         if not session_id or not new_model or new_model == old_model:
             return
-        if not hasattr(self.opencode, 'set_session_model'):
-            return
-        if self.opencode.set_session_model(session_id, new_model):
-            logger.info(f"📌 Conversa fixada no modelo {new_model} (o TUI reabre com ele).")
-        else:
-            logger.warning(
-                f"⚠️ Não consegui fixar {new_model} na conversa; "
-                "o TUI pode reabrir no modelo antigo e limitar de novo."
-            )
+        if hasattr(self.opencode, 'set_tui_model'):
+            if self.opencode.set_tui_model(new_model):
+                logger.info(f"📌 Modelo {new_model} na frente dos recentes do TUI.")
+            else:
+                logger.warning(
+                    f"⚠️ Não consegui atualizar o model.json do TUI; "
+                    "ele pode reabrir no modelo antigo."
+                )
+        if hasattr(self.opencode, 'set_session_model'):
+            if self.opencode.set_session_model(session_id, new_model):
+                logger.info(f"📌 Conversa fixada no modelo {new_model} (o TUI reabre com ele).")
+            else:
+                logger.warning(
+                    f"⚠️ Não consegui fixar {new_model} na conversa; "
+                    "o TUI pode reabrir no modelo antigo e limitar de novo."
+                )
 
     def _restart_service(self):
         if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():

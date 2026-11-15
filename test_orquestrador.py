@@ -92,6 +92,7 @@ class FakeOpenCode:
         self.started = 0
         self.started_with = []
         self.models_fixed = []
+        self.models_fixed_tui = []
         self.probe_calls = 0
         self.resume_calls = 0
         self.probe_models = []
@@ -133,6 +134,10 @@ class FakeOpenCode:
 
     def set_session_model(self, session_id, model):
         self.models_fixed.append((session_id, model))
+        return True
+
+    def set_tui_model(self, model):
+        self.models_fixed_tui.append(model)
         return True
 
     def start(self, folder=None, proxy_url=None, continue_session=False, session_id=None):
@@ -302,6 +307,9 @@ def test_fallback_modelo():
     ok &= check("fixou o model-b na conversa (o TUI reabre com ele)",
                 opencode.models_fixed == [("ses_test", "opencode/model-b")],
                 str(opencode.models_fixed))
+    ok &= check("model-b na frente dos recentes do TUI",
+                opencode.models_fixed_tui == ["opencode/model-b"],
+                str(opencode.models_fixed_tui))
     ok &= check("reabriu uma vez", opencode.started == 1)
     ok &= check("resultado desbloqueado", orchestrator.last_result == "desbloqueado")
     return bool(ok)

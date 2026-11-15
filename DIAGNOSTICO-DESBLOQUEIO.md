@@ -1,5 +1,76 @@
 # Diagnóstico: por que o desbloqueio automático não acontecia
 
+## 2ª rodada (14/11 noite): duas descobertas novas com evidência
+
+### A cota é por rota de saída × modelo (testado na máquina)
+
+Probes idênticos na mesma sessão:
+
+| Teste | Rota | Modelo | Resultado |
+|---|---|---|---|
+| probe manual | WARP (proxy 40000) | deepseek-v4.1-flash-free | `pong` |
+| probe manual | direta (sem proxy) | deepseek-v4.1-flash-free | 429 `Free usage limit reached` |
+| probe manual | direta (sem proxy) | beam-free | `pong` |
+| 3 rotações WARP seguidas | IPs novos | deepseek | `ok`, `burned`, `ok` |
+
+Conclusões:
+- o limite gratuito é chaveado pela **rota de saída** (IP) e pelo **modelo**;
+- os IPs do pool compartilhado do WARP (2a09:bac*) ficam queimados com
+  frequência para deepseek (modelo popular, usado por todo mundo no mesmo
+  pool) — à noite chegou a 17 IPs seguidos todos queimados;
+- um IP queimado volta a aceitar depois de alguns minutos (o mesmo IP que
+  deu 429 às 21:00 respondeu `pong` às 21:05).
+
+O plugin `~/.config/opencode/plugins/unlimited-shield.js` injeta o header
+`x-opencode-project: f6afa939...` (fixo, de `~/.config/opencode/identity.json`)
+em toda chamada de modelo. O projeto main não tem nada disso; o header fixo
+pode amarrar a cota a uma identidade que nunca muda — vale monitorar se
+rotação de IP continua resolvendo com ele ativo.
+
+### O TUI ignora o modelo gravado na sessão (achado decisivo)
+
+O TUI pega o modelo de `~/.local/state/opencode/model.json` (`recent[0]`),
+não da coluna `model` da `session_v2`. Comprovado: o fallback fixou
+beam-free no banco às 20:57:44 e o TUI reaberto usou deepseek às 20:58:18
+e **regravou** deepseek na sessão (time_updated da row). Por isso o
+desbloqueio "concluído" re-limitava em segundos e o ciclo recomeçava
+caçando o modelo queimado outra vez.
+
+Correção aplicada nesta rodada:
+
+- `core/opencode.py`:
+  - `set_tui_model()`: coloca o modelo escolhido no topo dos recentes do
+    model.json e ajusta a variante dele no mapa (`default` quando a
+    retomada não usou variante; uma variante herdada inexistente, tipo
+    beam-free herdando `#max`, faz o OpenCode regravar o modelo padrão);
+  - `set_session_model()`: não preserva mais a variante antiga (mesmo
+    motivo); usa a variante conhecida do model.json quando existir.
+- `core/orchestrator.py`: `_stick_model()` grava nos dois lugares
+  (model.json + session_v2) e o TUI é reaberto fixado na conversa
+  (`--session <id>`).
+- anti-loop trocado pelo modelo do main: `limit_rot_max` desbloqueios
+  seguidos sem resolver (3) pausam o automático; sucesso ou ação manual
+  zera. O teto por janela de tempo (5/30min) foi removido — o main o
+  removeu na v2.44.
+- `cli.py`: opção NOVA CONVERSA (IP novo + sessão nova), igual à opção 1
+  do main; rotação manual libera o automático.
+
+Lógica do main confirmada na leitura completa (`.bat` v2.60.x, app C++ 3.4.7
+e patch do desktop 2.2.7):
+
+1. limite detectado (watcher no log ou no fechamento do TUI);
+2. para o TUI; gira o egress (registro WARP novo, circuito Tor ou proxy);
+3. valida a rota: trace `warp=on` e IP diferente (IPv6 comparado por /64);
+4. probe `run --standalone --archived "Reply with exactly the word: pong"`
+   — só `pong` aprova; erro de cota = IP queimado; outra falha = probe
+   quebrado (2 seguidos → probe off). O desktop do main sonda com
+   `deepseek-v4.1-flash-free` fixo, até 10 IPs;
+5. retoma com `run -c --standalone --auto "continue"` (teto 600s + 60s de
+   inatividade); a própria retomada é o teste no `.bat` (PROBE=0 padrão);
+6. reinicia o serviço de background com o proxy novo em toda rotação;
+7. 3 limites seguidos (LIMIT_ROT_MAX) → para e pergunta; no modo automático
+   troca o egress (WARP→Tor→PROXY) e segue tentando.
+
 ## Sintoma
 
 O launcher detectava o limite no log, rotacionava o WARP com sucesso e ainda
@@ -165,9 +236,10 @@ para serem testados no fallback antes dos gratuitos.
   limitada, sem conversa, caçada esgotada, fallback de modelo, probe
   quebrado, anti-loop por streak, retomada com retorno não-padrão,
   concorrência e NOVA CONVERSA.
-- `python test_fluxo.py` → **9/9 grupos** (regressão do monitor, comandos,
+- `python test_fluxo.py` → **10/10 grupos** (regressão do monitor, comandos,
   probe com `pong`, evento estruturado de limite, texto da resposta que
-  cita "usage limit", timeout por inatividade e reabertura do TUI).
+  cita "usage limit", timeout por inatividade, reabertura do TUI e
+  `model.json` do TUI).
 - `python test_correcao.py`, `test_reset.py`, `test_sistema.py` → OK.
 
 Validação real com o OpenCode 2.2.7 e WARP ligado:

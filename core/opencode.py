@@ -369,11 +369,14 @@ class OpenCodeManager:
     def set_session_model(self, session_id: Optional[str], model: Optional[str]) -> bool:
         """Fixa o modelo da conversa no banco local.
 
-        O TUI não tem --model: reaberto com --continue ele volta a usar o
-        modelo gravado na sessão. O `-m` da retomada vale só para aquele
-        run (comprovado em campo: a sessão seguiu no modelo antigo), então
-        trocar de modelo para valer exige gravar na sessão — o equivalente
-        ao OC_MODEL persistente do .bat.
+        O `-m` da retomada vale só para aquele run (comprovado em campo: a
+        sessão seguiu no modelo antigo), então trocar de modelo para valer
+        exige gravar na sessão — o equivalente ao OC_MODEL persistente do
+        .bat.
+
+        NÃO preserva a variante antiga: uma variante que não existe no
+        modelo novo (ex.: beam-free herdando #max do deepseek) é recusada
+        pelo OpenCode, que regrava o modelo padrão por cima.
 
         Só deve ser chamado com o TUI e o serviço parados (o chamador já
         faz isso no desbloqueio).
@@ -395,17 +398,13 @@ class OpenCodeManager:
             ).fetchone()
             if not row:
                 return False
-            try:
-                data = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
-            except (TypeError, ValueError):
-                data = {}
-            if not isinstance(data, dict):
-                data = {}
-            data["providerID"] = provider
-            data["id"] = model_id
+            payload = {"providerID": provider, "id": model_id}
+            variant = self._tui_variant_for(model)
+            if variant:
+                payload["variant"] = variant
             cur = con.execute(
                 "update session_v2 set model = ? where id = ?",
-                (json.dumps(data), session_id),
+                (json.dumps(payload), session_id),
             )
             con.commit()
             return cur.rowcount > 0
@@ -414,6 +413,76 @@ class OpenCodeManager:
             return False
         finally:
             con.close()
+
+    # ---------------------------------------------------------------- estado do TUI
+    def get_tui_model_state_path(self) -> Path:
+        """model.json do TUI (de onde vem o modelo ao reabrir)."""
+        return Path.home() / ".local" / "state" / "opencode" / "model.json"
+
+    def _read_tui_model_state(self) -> dict:
+        path = self.get_tui_model_state_path()
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError) as e:
+            logger.debug(f"model.json do TUI ilegível: {e}")
+            return {}
+
+    def _write_tui_model_state(self, data: dict) -> bool:
+        path = self.get_tui_model_state_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+            return True
+        except OSError as e:
+            logger.debug(f"Falha ao gravar model.json do TUI: {e}")
+            return False
+
+    def _tui_variant_for(self, model: str) -> str:
+        """Variante que o TUI usaria para o modelo (mapa 'provider/modelo')."""
+        state = self._read_tui_model_state()
+        variants = state.get("variant") if isinstance(state.get("variant"), dict) else {}
+        value = variants.get(model)
+        return str(value) if value else ""
+
+    def set_tui_model(self, model: Optional[str]) -> bool:
+        """Coloca o modelo na frente da lista de recentes do TUI.
+
+        O TUI ignora o modelo gravado na sessão: ao reabrir ele usa o
+        primeiro da lista 'recent' de ~/.local/state/opencode/model.json e
+        REGRAVA esse modelo na sessão (comprovado: a sessão voltou ao
+        modelo antigo segundos depois do desbloqueio). Sem isso, a troca de
+        modelo não gruda.
+        """
+        if not model or "/" not in model:
+            return False
+        provider, _, model_id = model.partition("/")
+        state = self._read_tui_model_state()
+        if not state:
+            return False
+
+        entry = {"providerID": provider, "modelID": model_id}
+        recent = state.get("recent") if isinstance(state.get("recent"), list) else []
+        recent = [r for r in recent if not (
+            isinstance(r, dict)
+            and r.get("providerID") == provider
+            and r.get("modelID") == model_id
+        )]
+        state["recent"] = [entry] + recent
+
+        # a variante precisa existir no modelo novo: sem -m na retomada,
+        # o OpenCode usa a padrão, então "default" é o valor seguro
+        # (uma variante herdada que não existe faz o OpenCode regravar
+        # o modelo padrão na sessão).
+        variants = state.get("variant") if isinstance(state.get("variant"), dict) else {}
+        variants[model] = self._tui_variant_for(model) or "default"
+        state["variant"] = variants
+
+        return self._write_tui_model_state(state)
 
     def list_free_models(self, timeout: int = 90) -> List[str]:
         """Modelos gratuitos do provider opencode, ex.: opencode/iceman-free."""

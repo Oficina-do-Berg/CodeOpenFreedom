@@ -122,7 +122,7 @@ Você verá a tela principal:
 4. Caça uma rota que aceite esse modelo: gira o IP do WARP até 10 vezes e faz o probe com `-m <modelo>` (o probe só aprova quando o modelo responde `pong`)
 5. Retoma a mesma conversa com `opencode run --auto -s <id> -m <modelo>`
 6. Se nenhuma rota aceitar o modelo, troca para outro modelo `*-free` na rota atual (a cota é por modelo e também varia por rota: a caçada de IP é o plano A, a troca de modelo é o plano B)
-7. Grava o modelo novo na própria conversa (`📌 Conversa fixada no modelo ...`), porque o `-m` do `run` vale só para aquele turno
+7. Grava o modelo novo em dois lugares: na frente dos recentes do TUI (`~/.local/state/opencode/model.json`) e na própria conversa (`📌 Conversa fixada no modelo ...`), porque o `-m` do `run` vale só para aquele turno e o TUI reaberto regrava o modelo da sessão
 8. Reabre o TUI fixado na conversa (`--session <id>`) e volta a monitorar
 
 A retomada tem 600 s de teto e 60 s de inatividade (o mesmo `RESUME_IDLE`
