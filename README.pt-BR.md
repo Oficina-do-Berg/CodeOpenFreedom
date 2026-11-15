@@ -82,7 +82,7 @@ A tabela abaixo sumariza as diferenças operacionais entre o fluxo padrão de ex
 | Cenário Operacional | Fluxo Padrão (Sem CodeOpenFreedom) | Com CodeOpenFreedom |
 | :--- | :--- | :--- |
 | **Exaustão de Taxa (HTTP 429)** | Processo bloqueado; requer espera indeterminada | Detectado no log; rotação manual disponível (~15 s) |
-| **Saturação de Cota** | Interrupção manual do fluxo de desenvolvimento | Caçada de IP + probe com o modelo da conversa → fallback de modelo → retomada → reabertura automáticas, com trava de 5 por 30 min |
+| **Saturação de Cota** | Interrupção manual do fluxo de desenvolvimento | Caçada de IP + probe com o modelo da conversa → fallback de modelo → retomada → reabertura automáticas, com anti-loop de 3 desbloqueios seguidos |
 | **Integridade de Dados** | Risco de perda de histórico em limpezas manuais | Backup estruturado automático com marcação temporal |
 | **Configuração de Proxy** | Comandos manuais frequentes no console | Roteamento automático através da porta local 40000 |
 | **Estabilidade Visual** | Terminais suscetíveis a flicker e concorrência | TUI assíncrona, suave e estável no Windows Terminal |
@@ -155,6 +155,7 @@ INICIAR.bat
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │   > [ INICIAR OPENCODE ]  (ou [ PARAR OPENCODE ])          │
+│     [ NOVA CONVERSA ]                                      │
 │     [ ROTACIONAR IP ]                                      │
 │     [ RESET PROFUNDO ]                                     │
 │     [ AJUDA ]                                              │

@@ -82,7 +82,7 @@ La siguiente tabla resume las diferencias operativas entre la ejecución estánd
 | Escenario Operativo | Flujo Estándar (Sin CodeOpenFreedom) | Con CodeOpenFreedom |
 | :--- | :--- | :--- |
 | **Agotamiento de Tasa (HTTP 429)** | Flujo detenido; requiere espera indeterminada | Detectado en el log; rotación manual disponible (~15 s) |
-| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Búsqueda de IP + probe con el modelo de la conversación → fallback de modelo → reanudación → reapertura automáticas, con límite de 5 por 30 min |
+| **Agotamiento de Cuota** | Interrupción manual del flujo de desarrollo | Búsqueda de IP + probe con el modelo de la conversación → fallback de modelo → reanudación → reapertura automáticas, con anti-loop de 3 desbloqueos seguidos |
 | **Integridad de Datos** | Riesgo de pérdida de historial en limpiezas manuales | Respaldo automático estructurado con marca temporal |
 | **Configuración de Proxy** | Ejecución manual de comandos en la consola | Enrutamiento autónomo a través del puerto local 40000 |
 | **Estabilidad Visual** | Terminal susceptible a parpadeos y congelamiento | TUI asíncrona, suave y estable en Windows Terminal |
@@ -155,6 +155,7 @@ INICIAR.bat
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │   > [ INICIAR OPENCODE ]  (o [ DETENER OPENCODE ])         │
+│     [ CONVERSACION NUEVA ]                                 │
 │     [ ROTAR IP ]                                           │
 │     [ REINICIO PROFUNDO ]                                  │
 │     [ AYUDA ]                                              │

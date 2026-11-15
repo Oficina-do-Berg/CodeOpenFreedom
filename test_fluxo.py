@@ -29,8 +29,7 @@ class FakeConfig:
             "probe_enabled": False,
             "resume_auto": True,
             "resume_timeout": 30,
-            "max_rotations_per_window": 5,
-            "rotation_window_minutes": 30,
+            "limit_rot_max": 3,
             "rotate_on_rate_limit": False,
         }
         self.values.update(values)
@@ -212,14 +211,27 @@ def test_ip_key():
 
 
 def test_anti_loop():
-    print("\n6. Anti-loop de rotações")
-    config = FakeConfig(max_rotations_per_window=5, rotation_window_minutes=30)
+    print("\n6. Anti-loop do main: desbloqueios seguidos sem resolver pausam o automático")
+    config = FakeConfig(limit_rot_max=2)
     monitor = LogMonitor(config)
     orchestrator = Orchestrator(None, None, None, monitor, config)
 
-    results = [orchestrator._rotation_allowed() for _ in range(6)]
-    ok = check("5 rotações permitidas", all(results[:5]), str(results))
-    ok &= check("a 6ª é bloqueada", results[5] is False, str(results))
+    calls = []
+    orchestrator._run_unlock = lambda: calls.append(1)
+
+    orchestrator.handle_limit_detected()
+    ok = check("1º desbloqueio roda", len(calls) == 1, str(len(calls)))
+    ok &= check("sucesso zera o contador", orchestrator._quota_streak == 0,
+                str(orchestrator._quota_streak))
+
+    orchestrator._quota_streak = 2
+    orchestrator.handle_limit_detected()
+    ok &= check("3º seguido é bloqueado (limit_rot_max=2)", len(calls) == 1, str(len(calls)))
+    ok &= check("bloqueio não entra em desbloqueio", orchestrator.is_unlocking is False)
+
+    orchestrator.reset_streak()
+    orchestrator.handle_limit_detected()
+    ok &= check("ação manual libera o automático", len(calls) == 2, str(len(calls)))
     return bool(ok)
 
 
@@ -329,6 +341,20 @@ def test_comandos():
     ok &= check(
         "TUI abre com --standalone --continue",
         started and cmd == [manager.opencode_path, "--standalone", "--continue"],
+        str(cmd),
+    )
+
+    with patch("core.opencode.subprocess.Popen", return_value=FakeProcess()) as popen, \
+         patch("core.opencode.time.sleep", return_value=None):
+        started = manager.start(
+            proxy_url="http://127.0.0.1:40000",
+            session_id="ses_x",
+        )
+
+    cmd = popen.call_args[0][0]
+    ok &= check(
+        "TUI reabre fixado na conversa (--session <id>)",
+        started and cmd == [manager.opencode_path, "--standalone", "--session", "ses_x"],
         str(cmd),
     )
     return bool(ok)

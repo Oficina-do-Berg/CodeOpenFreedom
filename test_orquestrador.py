@@ -31,8 +31,7 @@ class FakeConfig:
             "probe_model": "",
             "probe_broken_max": 2,
             "hunt_max": 10,
-            "max_rotations_per_window": 50,
-            "rotation_window_minutes": 30,
+            "limit_rot_max": 50,
             "rotate_on_rate_limit": False,
             "max_model_switches": 4,
             "model_candidates": ["opencode/model-a", "opencode/model-b", "opencode/model-c"],
@@ -92,6 +91,7 @@ class FakeOpenCode:
         self.stopped = 0
         self.started = 0
         self.started_with = []
+        self.models_fixed = []
         self.probe_calls = 0
         self.resume_calls = 0
         self.probe_models = []
@@ -131,9 +131,13 @@ class FakeOpenCode:
         self.resume_calls_detail.append((model, session_id))
         return self.resume_results.pop(0) if self.resume_results else ("ok", "")
 
-    def start(self, proxy_url=None, continue_session=False):
+    def set_session_model(self, session_id, model):
+        self.models_fixed.append((session_id, model))
+        return True
+
+    def start(self, folder=None, proxy_url=None, continue_session=False, session_id=None):
         self.started += 1
-        self.started_with.append((proxy_url, continue_session))
+        self.started_with.append((proxy_url, continue_session, session_id))
         return True
 
 
@@ -190,9 +194,11 @@ def test_normal():
     ok &= check("retomou a mesma sessão com o modelo testado",
                 opencode.resume_calls_detail == [("opencode/model-a", "ses_test")],
                 str(opencode.resume_calls_detail))
-    ok &= check("reabriu na conversa", opencode.started_with == [
-        (connection.proxy_url, True)
+    ok &= check("reabriu na conversa fixada pelo id", opencode.started_with == [
+        (connection.proxy_url, True, "ses_test")
     ], str(opencode.started_with))
+    ok &= check("não trocou o modelo (é o da conversa)", opencode.models_fixed == [],
+                str(opencode.models_fixed))
     ok &= check("monitor religado", monitor.started == 1)
     ok &= check("resultado desbloqueado", orchestrator.last_result == "desbloqueado")
     return bool(ok)
@@ -293,6 +299,9 @@ def test_fallback_modelo():
     ok &= check("retomou com model-b",
                 opencode.resume_calls_detail == [("opencode/model-b", "ses_test")],
                 str(opencode.resume_calls_detail))
+    ok &= check("fixou o model-b na conversa (o TUI reabre com ele)",
+                opencode.models_fixed == [("ses_test", "opencode/model-b")],
+                str(opencode.models_fixed))
     ok &= check("reabriu uma vez", opencode.started == 1)
     ok &= check("resultado desbloqueado", orchestrator.last_result == "desbloqueado")
     return bool(ok)
@@ -318,22 +327,27 @@ def test_probe_quebrado():
 
 
 def test_anti_loop():
-    print("\n8. Anti-loop: segunda sequência é bloqueada")
+    print("\n8. Anti-loop do main: desbloqueios seguidos sem resolver pausam o automático")
     orchestrator, opencode, rotator, monitor, connection = build(
-        probe_results=[("ok", ""), ("ok", "")],
-        resume_results=[("ok", ""), ("ok", "")],
-        max_rotations_per_window=1,
+        probe_results=[("burned", "")] * 6,
+        resume_results=[],
+        hunt_max=1,
+        model_switch_fallback=False,
+        limit_rot_max=2,
     )
     run(orchestrator)
-    first_ok = orchestrator.last_result == "desbloqueado"
-
     run(orchestrator)
-    second_blocked = orchestrator.last_result == "limite de rotações atingido"
-
-    ok = check("primeira passou", first_ok)
-    ok &= check("segunda bloqueada", second_blocked)
-    ok &= check("não parou o TUI de novo", opencode.stopped == 1, str(opencode.stopped))
-    return bool(ok)
+    falhas = check("dois desbloqueios seguidos rodam", opencode.stopped == 2, str(opencode.stopped))
+    run(orchestrator)
+    bloqueado = check(
+        "o 3º seguido é bloqueado (limit_rot_max=2)",
+        opencode.stopped == 2 and orchestrator.last_result == "limite de desbloqueios seguidos",
+        orchestrator.last_result,
+    )
+    orchestrator.reset_streak()
+    run(orchestrator)
+    liberado = check("ação manual libera o automático", opencode.stopped == 3, str(opencode.stopped))
+    return bool(falhas and bloqueado and liberado)
 
 
 def test_retomada_aviso_nao_descarta_rota():
@@ -370,6 +384,22 @@ def test_concorrencia_bloqueia_start():
     return bool(ok)
 
 
+def test_nova_conversa():
+    print("\n11. NOVA CONVERSA: gira o IP e abre sessão nova (opção 1 do main)")
+    orchestrator, opencode, rotator, monitor, connection = build()
+
+    ok = check("fluxo iniciou", orchestrator.start_full_flow(fresh=True))
+    ok &= check("girou o IP antes de abrir", rotator.rotation_count == 1,
+                str(rotator.rotation_count))
+    ok &= check("abriu sem --continue e sem fixar sessão",
+                opencode.started_with == [(connection.proxy_url, False, None)],
+                str(opencode.started_with))
+    ok &= check("monitor ligado", monitor.started == 1, str(monitor.started))
+    ok &= check("streak zerado", orchestrator._quota_streak == 0,
+                str(orchestrator._quota_streak))
+    return bool(ok)
+
+
 def main():
     print("=" * 70)
     print(" TESTE DO ORQUESTRADOR (COMPONENTES FALSOS)")
@@ -386,6 +416,7 @@ def main():
         test_anti_loop,
         test_retomada_aviso_nao_descarta_rota,
         test_concorrencia_bloqueia_start,
+        test_nova_conversa,
     ]
 
     results = []

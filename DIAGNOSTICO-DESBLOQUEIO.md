@@ -91,8 +91,14 @@ mesmo 429 quando a cota do modelo da conversa acabou.
   aprova a rota quando a resposta contém `pong`. `rc=0` sem `pong` vira
   `broken`; 429/limite vira `burned`; timeout continua `timeout`.
 - `resume(..., model=..., session_id=...)`: retoma a **mesma sessão**
-  (`-s <id>`), com `-m <modelo>` explícito. Um `-m` novo troca o modelo
-  fixado na conversa; é isso que desbloqueia.
+  (`-s <id>`), com `-m <modelo>` explícito.
+- `set_session_model(session_id, 'provider/modelo')`: grava o modelo novo na
+  coluna `model` da sessão. Em campo o `-m` do `run` valeu só para aquele
+  turno: o TUI reaberto com `--continue` voltava ao modelo antigo e limitava
+  de novo em segundos. Fixar na sessão é o equivalente ao `OC_MODEL`
+  persistente do `.bat`.
+- `start(..., session_id=...)`: reabre o TUI com `--session <id>`, fixado na
+  conversa certa, em vez de `--continue` (que pega a mais recente).
 - A classificação de probe e retomada usa o **evento estruturado** do
   `run --format json` (`{"type":"error","error":{...}}`), não o texto solto.
   A própria conversa pode citar "usage limit" ou "session not found" sem
@@ -118,7 +124,13 @@ Fluxo (o mesmo do main, com fallback de modelo):
 6. quando o probe passa, retoma a mesma conversa com `-s <id> -m <modelo>`;
 7. se a caçada esgota, troca para outro modelo livre na rota atual
    (`model_switch_fallback`, equivalente ao `LIMIT_ACTION=provider`);
-8. reabre o TUI com `--continue` e volta a monitorar.
+8. fixa o modelo aprovado na conversa (`set_session_model`) e reabre o TUI
+   com `--session <id>`, voltando a monitorar.
+
+O anti-loop segue o `LIMIT_ROT_MAX` do `.bat`: `limit_rot_max` (3) conta
+desbloqueios **seguidos** que não resolveram; sucesso zera, e qualquer ação
+manual (nova conversa, rotacionar IP, iniciar) também libera. A opção
+[ NOVA CONVERSA ] gira o IP e abre uma sessão nova, como a opção 1 do main.
 
 O modelo que passou no probe fica salvo em `last_good_model` no
 `~/.opencode-infinity-simple/config.json` e é testado primeiro na próxima
@@ -138,7 +150,8 @@ Novas opções:
   "model_switch_fallback": true,
   "resume_timeout": 600,
   "resume_idle": 60,
-  "probe_timeout": 60
+  "probe_timeout": 60,
+  "limit_rot_max": 3
 }
 ```
 
@@ -147,10 +160,11 @@ para serem testados no fallback antes dos gratuitos.
 
 ## Testes
 
-- `python test_orquestrador.py` → **10/10 cenários**.
+- `python test_orquestrador.py` → **11/11 cenários**.
   Inclui: rota nova aceita o modelo, rota limitada (gira de novo), retomada
   limitada, sem conversa, caçada esgotada, fallback de modelo, probe
-  quebrado, anti-loop, retomada com retorno não-padrão e concorrência.
+  quebrado, anti-loop por streak, retomada com retorno não-padrão,
+  concorrência e NOVA CONVERSA.
 - `python test_fluxo.py` → **9/9 grupos** (regressão do monitor, comandos,
   probe com `pong`, evento estruturado de limite, texto da resposta que
   cita "usage limit", timeout por inatividade e reabertura do TUI).

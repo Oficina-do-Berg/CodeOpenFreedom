@@ -95,6 +95,7 @@ Você verá a tela principal:
 ──────────────────────────────────────────────────────────────────────
 
   > [ INICIAR OPENCODE ]
+    [ NOVA CONVERSA ]
     [ ROTACIONAR IP ]
     [ RESET PROFUNDO ]
     [ AJUDA ]
@@ -121,7 +122,8 @@ Você verá a tela principal:
 4. Caça uma rota que aceite esse modelo: gira o IP do WARP até 10 vezes e faz o probe com `-m <modelo>` (o probe só aprova quando o modelo responde `pong`)
 5. Retoma a mesma conversa com `opencode run --auto -s <id> -m <modelo>`
 6. Se nenhuma rota aceitar o modelo, troca para outro modelo `*-free` na rota atual (a cota é por modelo e também varia por rota: a caçada de IP é o plano A, a troca de modelo é o plano B)
-7. Reabre o TUI com `--continue` e volta a monitorar
+7. Grava o modelo novo na própria conversa (`📌 Conversa fixada no modelo ...`), porque o `-m` do `run` vale só para aquele turno
+8. Reabre o TUI fixado na conversa (`--session <id>`) e volta a monitorar
 
 A retomada tem 600 s de teto e 60 s de inatividade (o mesmo `RESUME_IDLE`
 do main): um turno longo continua vivo enquanto escreve; travado sem saída,
@@ -132,8 +134,11 @@ O modelo que passou no probe fica salvo em `last_good_model` no
 Se a caçada de IP e o fallback de modelo esgotarem, o log informa em quantas
 horas a próxima cota volta.
 
-**Anti-loop:** no máximo 5 desbloqueios a cada 30 minutos. Ao passar disso, o
-automático para e avisa no log, em vez de girar IP sem parar.
+**Anti-loop:** igual ao `LIMIT_ROT_MAX` do `.bat`: **3 desbloqueios seguidos**
+que voltam a bater no limite pausam o automático (`limit_rot_max` no
+`config.json`; `0` desliga a trava). Um desbloqueio bem-sucedido zera a
+contagem, e qualquer ação manual ([ NOVA CONVERSA ], [ ROTACIONAR IP ],
+[ INICIAR OPENCODE ]) libera o automático de novo.
 
 **Rate limit puro (HTTP 429)** não rotaciona sozinho, porque costuma ser
 temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
@@ -147,7 +152,26 @@ temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 
 ---
 
-### 🔴 Opção 2: ROTACIONAR IP
+### 🔴 Opção 2: NOVA CONVERSA (IP novo + sessão nova)
+
+**O que faz:**
+- Para o TUI e o monitor, gira o IP do WARP e abre uma conversa **nova**
+- Não mexe na conversa antiga: ela continua guardada para [ INICIAR OPENCODE ]
+- É a opção 1 do launcher original: a cota gratuita é por modelo, e uma
+  conversa nova usa o modelo padrão, que costuma ter cota mesmo quando o
+  modelo antigo esgotou
+
+**Como usar:**
+1. Navegue até `[ NOVA CONVERSA ]`
+2. Pressione ENTER
+3. Aguarde a troca de IP (~16 s) e o TUI abrir
+
+**Quando usar:** quando o automático pausou (3 desbloqueios seguidos) ou você
+quer começar um assunto do zero sem esperar a cota do modelo antigo voltar.
+
+---
+
+### 🔴 Opção 3: ROTACIONAR IP
 
 **O que faz:**
 - Força uma rotação de IP imediata via WARP
@@ -164,7 +188,7 @@ temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 
 ---
 
-### 🔴 Opção 3: RESET PROFUNDO
+### 🔴 Opção 4: RESET PROFUNDO
 
 **O que faz:**
 - Para o TUI e o serviço de background
@@ -183,13 +207,13 @@ temporário. Use **[ ROTACIONAR IP ]** se quiser trocar a rota na mão.
 
 ---
 
-### 🔴 Opção 4: AJUDA
+### 🔴 Opção 5: AJUDA
 
 Mostra o resumo das funções, teclas e requisitos.
 
 ---
 
-### 🔴 Opção 5: SAIR
+### 🔴 Opção 6: SAIR
 
 **O que faz:**
 - Encerra o programa com segurança
@@ -324,8 +348,10 @@ se a caçada esgotar.
    livre`. Se aparecer `Nenhuma rota nem modelo livre aceitou`, aguarde o
    tempo indicado (≈ 3h) ou configure `model_candidates` com um
    provider/modelo pago no `config.json`
-4. Se aparecer "Limite de desbloqueios automáticos atingido", aguarde a janela de
-   30 minutos ou use [ ROTACIONAR IP ] manualmente
+4. Se aparecer "desbloqueios seguidos sem resolver", use [ NOVA CONVERSA ]
+   (IP novo + sessão nova) ou [ ROTACIONAR IP ] manualmente; qualquer ação
+   manual libera o automático. Para mudar o limite, ajuste `limit_rot_max`
+   no `config.json` (`0` desliga)
 5. Rate limit puro (HTTP 429) **não** rotaciona sozinho por padrão; use
    [ ROTACIONAR IP ] se quiser trocar a rota
 
@@ -425,9 +451,8 @@ cd "c:\Users\berg\Desktop\OPENCODE INFINITE TESTE\opencode-infinity-simple"
 # PASSO 8: Trabalhe normalmente!
 # ─────────────────────────────────────────────────
 # Quando o OpenCode atingir o limite:
-# - Volte ao CodeOpen
-# - Selecione [ ROTACIONAR IP ]
-# - Aguarde ~16 segundos
+# - Deixe o automático agir (ele caça rota/modelo e reabre a conversa)
+# - Se o automático pausar, use [ NOVA CONVERSA ] ou [ ROTACIONAR IP ]
 # - Continue trabalhando!
 ```
 

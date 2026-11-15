@@ -18,7 +18,6 @@ Mesma lógica do main:
 import os
 import threading
 import time
-from collections import deque
 from typing import Optional
 
 from utils.logger import get_logger
@@ -42,25 +41,19 @@ class Orchestrator:
         self.is_unlocking = False
 
         self._handling = threading.Lock()
-        self._rotation_times = deque()
+        self._quota_streak = 0  # desbloqueios seguidos que não resolveram (main: QUOTA_STREAK)
 
         self.monitor.on_limit = self.handle_limit_detected
         self.monitor.on_ask = self.handle_rate_limit_detected
 
     # ------------------------------------------------------------------ anti-loop
-    def _rotation_allowed(self) -> bool:
-        window = float(self.config.get('rotation_window_minutes', 30)) * 60
-        limit = int(self.config.get('max_rotations_per_window', 5))
-        now = time.time()
+    # O .bat removeu o teto por janela de tempo (v2.44): conta só desbloqueios
+    # seguidos que voltaram a bater no limite (LIMIT_ROT_MAX) e um resume bom
+    # zera o contador. Ação manual também libera (reset_streak).
 
-        while self._rotation_times and now - self._rotation_times[0] > window:
-            self._rotation_times.popleft()
-
-        if len(self._rotation_times) >= limit:
-            return False
-
-        self._rotation_times.append(now)
-        return True
+    def reset_streak(self) -> None:
+        """Ação manual (rotacionar, iniciar, conversa nova) libera o automático."""
+        self._quota_streak = 0
 
     # ------------------------------------------------------------------ callbacks
     def handle_rate_limit_detected(self):
@@ -75,6 +68,15 @@ class Orchestrator:
 
     def handle_limit_detected(self):
         """Callback do monitor. Roda em thread própria."""
+        limit = int(self.config.get('limit_rot_max', 3) or 0)
+        if limit and self._quota_streak >= limit:
+            logger.error(
+                f"❌ {self._quota_streak} desbloqueios seguidos sem resolver "
+                f"(limit_rot_max={limit}). Automático pausado, como no .bat "
+                f"(LIMIT_ROT_MAX). Use ROTACIONAR IP ou NOVA CONVERSA para tentar de novo."
+            )
+            self.last_result = "limite de desbloqueios seguidos"
+            return
         if not self._handling.acquire(blocking=False):
             logger.info("ℹ️ Um desbloqueio já está em andamento; gatilho ignorado.")
             return
@@ -125,6 +127,25 @@ class Orchestrator:
         except Exception as e:
             logger.debug(f"Não foi possível salvar o modelo bom: {e}")
 
+    def _stick_model(self, session_id: Optional[str], old_model: Optional[str],
+                     new_model: Optional[str]) -> None:
+        """Fixa o modelo novo na conversa, para o TUI reabrir com ele.
+
+        O `-m` da retomada vale só para aquele run: em campo a sessão seguiu
+        no modelo antigo e o TUI re-limitava segundos depois do desbloqueio.
+        """
+        if not session_id or not new_model or new_model == old_model:
+            return
+        if not hasattr(self.opencode, 'set_session_model'):
+            return
+        if self.opencode.set_session_model(session_id, new_model):
+            logger.info(f"📌 Conversa fixada no modelo {new_model} (o TUI reabre com ele).")
+        else:
+            logger.warning(
+                f"⚠️ Não consegui fixar {new_model} na conversa; "
+                "o TUI pode reabrir no modelo antigo e limitar de novo."
+            )
+
     def _restart_service(self):
         if hasattr(self.opencode, 'restart_service') and self.opencode.supports_service():
             self.opencode.restart_service(self.connection.proxy_url)
@@ -173,21 +194,13 @@ class Orchestrator:
         # nenhuma linha nova (probe/resume) dispare outro desbloqueio.
         self.monitor.stop()
 
-        if not self._rotation_allowed():
-            logger.error(
-                "❌ Limite de desbloqueios automáticos atingido "
-                f"({self.config.get('max_rotations_per_window', 5)} em "
-                f"{self.config.get('rotation_window_minutes', 30)} min). "
-                "Automático pausado para não entrar em loop."
-            )
-            self.last_result = "limite de rotações atingido"
-            return
-
         workdir = self.working_dir or os.getcwd()
         session_id = None
         session_model = None
+        original_model = None
         try:
             session_id, session_model, session_dir = self.opencode.latest_session(workdir)
+            original_model = session_model
             if session_dir:
                 workdir = session_dir
         except Exception as e:
@@ -267,6 +280,7 @@ class Orchestrator:
             # Rota aprovada no probe (ou probe desativado): retomar a conversa.
             ok, reason = self._resume_target(workdir, session_id, probe_model)
             if ok:
+                self._stick_model(session_id, original_model, probe_model)
                 resumed = True
                 unlock_reason = reason
                 break
@@ -301,18 +315,21 @@ class Orchestrator:
                 ok, reason = self._resume_target(workdir, session_id, model)
                 if ok:
                     self.model_switch_count += 1
+                    self._stick_model(session_id, original_model, model)
                     resumed = True
                     unlock_reason = f"fallback: {reason}"
                     break
 
-        # 4. reabrir o TUI na mesma conversa
+        # 4. reabrir o TUI na MESMA conversa (fixado pelo id, como o .bat fixa o chat)
         if resumed:
             logger.info("4️⃣ Reabrindo o OpenCode na conversa...")
             if self.opencode.start(
                 proxy_url=self.connection.proxy_url,
-                continue_session=True
+                continue_session=True,
+                session_id=session_id,
             ):
                 self.rotation_count += 1
+                self._quota_streak = 0
                 self.last_result = "desbloqueado"
                 if self.config.get('auto_rotate', True):
                     logger.info("5️⃣ Reativando o monitor (somente linhas novas)...")
@@ -340,23 +357,25 @@ class Orchestrator:
                 "Automático pausado."
             )
         self.last_result = "falha no desbloqueio"
+        self._quota_streak += 1
         self.opencode.start(
             proxy_url=self.connection.proxy_url,
-            continue_session=True
+            continue_session=True,
+            session_id=session_id,
         )
 
     # ------------------------------------------------------------------- start/stop
-    def start_full_flow(self, folder: Optional[str] = None) -> bool:
+    def start_full_flow(self, folder: Optional[str] = None, fresh: bool = False) -> bool:
         if self.is_unlocking or self._handling.locked():
             logger.warning("⚠️ Um desbloqueio já está em andamento. Aguarde a conclusão.")
             return False
 
         logger.info("=" * 60)
-        logger.info("🚀 INICIANDO FLUXO COMPLETO")
+        logger.info("🚀 INICIANDO FLUXO COMPLETO" + (" (CONVERSA NOVA)" if fresh else ""))
         logger.info("=" * 60)
 
         self.working_dir = os.path.abspath(folder) if folder else os.getcwd()
-        self._rotation_times.clear()
+        self._quota_streak = 0
         self.last_result = ""
 
         method = self.config.get('connection_method', 'WARP')
@@ -369,6 +388,16 @@ class Orchestrator:
         logger.info(f"✅ {msg}")
         logger.info(f"   IP: {self.connection.current_ip}")
 
+        if fresh:
+            # opção 1 do main (fresh start): IP novo + sessão nova. A cota
+            # gratuita é por modelo; uma conversa nova usa o modelo padrão,
+            # que costuma ter cota mesmo quando o modelo antigo esgotou.
+            logger.info("   Conversa nova: trocando o IP antes de abrir...")
+            if not self.rotator.rotate(max_retries=1):
+                logger.warning(
+                    "   ⚠️ Não consegui trocar o IP; abrindo a conversa nova mesmo assim."
+                )
+
         # Reiniciar o serviço de background sob o novo proxy (padrão do main)
         self._restart_service()
 
@@ -376,7 +405,7 @@ class Orchestrator:
         success = self.opencode.start(
             folder=self.working_dir,
             proxy_url=self.connection.proxy_url,
-            continue_session=bool(self.config.get('start_continue', True))
+            continue_session=bool(self.config.get('start_continue', True)) and not fresh,
         )
         if not success:
             logger.error("❌ Falha ao iniciar OpenCode")

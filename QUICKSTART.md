@@ -49,5 +49,6 @@ INICIAR.bat
    * Estabelecer o proxy local via WARP na porta 40000
    * Iniciar o OpenCode CLI roteado pelo túnel seguro
    * Monitorar **somente linhas novas** de erro no log do OpenCode
-   * Ao detectar limite real: rotacionar o IP, testar a rota, retomar a conversa e reabrir o TUI
-   * Respeitar o limite de 5 desbloqueios automáticos por 30 minutos (anti-loop)
+   * Ao detectar limite real: caçar uma rota que aceite o modelo da conversa, fixar o modelo aprovado e reabrir o TUI na mesma conversa
+   * Se a caçada esgotar, trocar para outro modelo `*-free` livre
+   * Respeitar o anti-loop do main: 3 desbloqueios seguidos sem resolver pausam o automático (qualquer ação manual libera)

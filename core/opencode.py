@@ -366,6 +366,55 @@ class OpenCodeManager:
             con.close()
         return usage
 
+    def set_session_model(self, session_id: Optional[str], model: Optional[str]) -> bool:
+        """Fixa o modelo da conversa no banco local.
+
+        O TUI não tem --model: reaberto com --continue ele volta a usar o
+        modelo gravado na sessão. O `-m` da retomada vale só para aquele
+        run (comprovado em campo: a sessão seguiu no modelo antigo), então
+        trocar de modelo para valer exige gravar na sessão — o equivalente
+        ao OC_MODEL persistente do .bat.
+
+        Só deve ser chamado com o TUI e o serviço parados (o chamador já
+        faz isso no desbloqueio).
+        """
+        if not session_id or not model or "/" not in model:
+            return False
+        provider, _, model_id = model.partition("/")
+        db = self._db_path()
+        if not db.exists():
+            return False
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=rw", uri=True, timeout=5)
+        except sqlite3.Error as e:
+            logger.debug(f"Banco do OpenCode indisponível para escrita: {e}")
+            return False
+        try:
+            row = con.execute(
+                "select model from session_v2 where id = ?", (session_id,)
+            ).fetchone()
+            if not row:
+                return False
+            try:
+                data = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
+            except (TypeError, ValueError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data["providerID"] = provider
+            data["id"] = model_id
+            cur = con.execute(
+                "update session_v2 set model = ? where id = ?",
+                (json.dumps(data), session_id),
+            )
+            con.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error as e:
+            logger.debug(f"Falha ao fixar o modelo da sessão: {e}")
+            return False
+        finally:
+            con.close()
+
     def list_free_models(self, timeout: int = 90) -> List[str]:
         """Modelos gratuitos do provider opencode, ex.: opencode/iceman-free."""
         if self._free_models is not None:
@@ -637,8 +686,13 @@ class OpenCodeManager:
         return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
     def start(self, folder: Optional[str] = None, proxy_url: Optional[str] = None,
-              continue_session: bool = False, _allow_standalone: bool = True) -> bool:
-        """Abre o TUI em um console próprio, com o proxy atual."""
+              continue_session: bool = False, session_id: Optional[str] = None,
+              _allow_standalone: bool = True) -> bool:
+        """Abre o TUI em um console próprio, com o proxy atual.
+
+        Com session_id, reabre fixado naquela conversa (`--session <id>`);
+        é como o .bat retoma um chat fixado em vez do mais recente.
+        """
         if folder:
             self.working_dir = os.path.abspath(folder)
         elif not self.working_dir:
@@ -658,7 +712,9 @@ class OpenCodeManager:
 
         standalone = bool(_allow_standalone and self.supports_standalone())
         args = ["--standalone"] if standalone else []
-        if continue_session:
+        if session_id:
+            args += ["--session", session_id]
+        elif continue_session:
             args.append("--continue")
 
         cmd = [self.opencode_path] + args
@@ -692,12 +748,12 @@ class OpenCodeManager:
                 self.process = None
                 self._pid_create_time = None
 
-                if continue_session:
-                    logger.info("↩️ Tentando abrir sem --continue...")
-                    return self.start(folder, proxy_url, False, _allow_standalone)
+                if continue_session or session_id:
+                    logger.info("↩️ Tentando abrir sem fixar a conversa...")
+                    return self.start(folder, proxy_url, False, None, _allow_standalone)
                 if standalone:
                     logger.info("↩️ Tentando abrir sem --standalone...")
-                    return self.start(folder, proxy_url, False, False)
+                    return self.start(folder, proxy_url, False, None, False)
                 return False
 
             logger.info(f"✅ OpenCode TUI iniciado (PID {self.pid})")

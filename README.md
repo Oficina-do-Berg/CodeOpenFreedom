@@ -82,7 +82,7 @@ The table below contrasts standard OpenCode CLI operation against the managed ar
 | Operational Scenario | Standard Workflow (Without CodeOpenFreedom) | With CodeOpenFreedom |
 | :--- | :--- | :--- |
 | **Rate Limit Exceeded (HTTP 429)** | Workflow halted; requires indeterminate idle wait | Detected in the log; manual route failover available (~15 s) |
-| **Quota Depletion** | Manual interruption and loss of development velocity | IP hunt + probe with the conversation model → model fallback → resume → reopen, with a 5-per-30-min anti-loop gate |
+| **Quota Depletion** | Manual interruption and loss of development velocity | IP hunt + probe with the conversation model → model fallback → resume → reopen, with a 3-in-a-row anti-loop gate |
 | **Data Integrity** | High risk of chat history loss during manual cleanup | Automatic timestamped backup archive to Desktop |
 | **Proxy Configuration** | Manual execution of console network commands | Autonomous, transparent routing on local port 40000 |
 | **Interface Stability** | Terminal susceptible to flicker and thread locking | Smooth, flicker-free ANSI TUI on Windows Terminal |
@@ -155,6 +155,7 @@ INICIAR.bat
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │   > [ START OPENCODE ]  (or [ STOP OPENCODE ])             │
+│     [ NEW CHAT ]                                           │
 │     [ ROTATE IP ]                                          │
 │     [ DEEP RESET ]                                         │
 │     [ HELP ]                                               │

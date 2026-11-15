@@ -44,9 +44,8 @@ class Config:
         "last_good_model": "",       # último modelo que passou no probe
         "model_switch_fallback": True,
 
-        # --- anti-loop (equivalente ao rot_gate do main) ---
-        "max_rotations_per_window": 5,
-        "rotation_window_minutes": 30,
+        # --- anti-loop (equivalente ao LIMIT_ROT_MAX do .bat) ---
+        "limit_rot_max": 3,          # desbloqueios seguidos sem resolver antes de pausar (0 = nunca pausar)
 
         # --- watcher ---
         "settle_seconds": 4,          # espera o bloco de erro terminar; nunca cancela o limite
@@ -81,6 +80,11 @@ class Config:
                 if self.config.get('probe_timeout') == 120:
                     self.config['probe_timeout'] = self.DEFAULT_CONFIG['probe_timeout']
                     migrated = True
+                # Anti-loop antigo (janela de tempo) virou LIMIT_ROT_MAX do main.
+                for key in ("max_rotations_per_window", "rotation_window_minutes"):
+                    if key in self.config:
+                        del self.config[key]
+                        migrated = True
                 if migrated:
                     self.save()
             except Exception as e:

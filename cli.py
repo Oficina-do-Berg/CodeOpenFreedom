@@ -58,6 +58,7 @@ TRANSLATIONS = {
         'disconnected': 'Desconectado', 'active': 'ATIVO',
         'stopped': 'PARADO', 'inactive': 'INATIVO',
         'unlocking': 'DESBLOQUEANDO...',
+        'new_chat': 'NOVA CONVERSA (IP NOVO + SESSÃO NOVA)',
         'start_opencode': 'INICIAR OPENCODE',
         'stop_opencode': 'PARAR OPENCODE',
         'rotate_ip': 'ROTACIONAR IP',
@@ -73,6 +74,7 @@ TRANSLATIONS = {
         'disconnected': 'Disconnected', 'active': 'ACTIVE',
         'stopped': 'STOPPED', 'inactive': 'INACTIVE',
         'unlocking': 'UNLOCKING...',
+        'new_chat': 'NEW CHAT (NEW IP + NEW SESSION)',
         'start_opencode': 'START OPENCODE',
         'stop_opencode': 'STOP OPENCODE',
         'rotate_ip': 'ROTATE IP',
@@ -114,6 +116,7 @@ class CodeOpenCLI:
         
         self.menu_options = [
             (toggle_label, self.toggle_opencode),
+            (t['new_chat'], self.new_chat),
             (t['rotate_ip'], self.rotate_ip),
             (t['deep_reset'], self.deep_reset),
             (t['help'], self.show_help),
@@ -288,6 +291,40 @@ class CodeOpenCLI:
         msvcrt.getch()
         self.update_menu_options()
     
+    def new_chat(self):
+        """Opção 1 do main (fresh start): IP novo + sessão nova.
+
+        A cota gratuita é por modelo; uma conversa nova usa o modelo padrão,
+        que costuma ter cota mesmo quando o modelo da conversa antiga
+        esgotou. É por isso que no main "clicar já desbloqueia".
+        """
+        if getattr(self.orchestrator, 'is_unlocking', False):
+            self.clear_screen()
+            print(f"\n  {YELLOW}Aguarde: O desbloqueio automático e a rotação de IP já estão em andamento!{RESET}\n")
+            time.sleep(2)
+            self.update_menu_options()
+            return
+
+        self.clear_screen()
+        is_running = self.opencode.is_running(only_dir=self.orchestrator.working_dir)
+
+        if is_running:
+            print(f"\n  {WHITE}Parando OpenCode e Monitoramento para a conversa nova...{RESET}\n")
+            self.orchestrator.stop_flow()
+
+        print(f"\n  {WHITE}Iniciando CONVERSA NOVA com IP novo (padrão do main)...{RESET}\n")
+        success = self.orchestrator.start_full_flow(fresh=True)
+        if success:
+            print(f"  {RED}OK - Conversa nova aberta com IP novo!{RESET}")
+            print(f"  {DIM_WHITE}A conversa antiga continua guardada: use INICIAR OPENCODE para voltar a ela.{RESET}\n")
+        else:
+            print(f"  {RED}ERRO: Falha ao abrir a conversa nova.{RESET}")
+            print(f"  {DIM_WHITE}Verifique os logs em ~/.opencode-infinity-simple/logs/{RESET}\n")
+
+        print(f"  {DIM_WHITE}{self.t('press_key')}...{RESET}")
+        msvcrt.getch()
+        self.update_menu_options()
+
     def rotate_ip(self):
         if getattr(self.orchestrator, 'is_unlocking', False):
             self.clear_screen()
@@ -306,6 +343,7 @@ class CodeOpenCLI:
         
         success = self.rotator.rotate()
         if success:
+            self.orchestrator.reset_streak()
             print(f"\n  {RED}OK - IP rotacionado com sucesso!{RESET}")
             if self.opencode.supports_service():
                 self.opencode.restart_service(self.connection.proxy_url)
